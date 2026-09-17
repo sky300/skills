@@ -156,15 +156,20 @@ binary lives. If the site starts rejecting the session anyway, that is the reaso
 3. `body` / `risk_markers` showing 请先登录 / 验证码 / 安全验证 / 异常访问 means a
    login wall or risk-control page — a cookie or kernel problem, not a selector
    problem.
-4. Everything else (item detail, own listings, chats) never needed the browser:
-   copy `templates/mtop_request.py`, adapt the marked lines, run it.
+4. Everything else (item detail, own listings, chats) is **also** done in the
+   browser: sign the URL on the host with `templates/mtop_request.py`, then run
+   it with `fetch()` in the page. A host HTTP client works briefly and then trips
+   `RGV587`; see `mtop-apis.md` for the measurement.
 
 ## If the setup fails
 
-- **Report what you tried and where it stopped.** Do not silently fall back to
-  fetching the search page over HTTP — it is client-rendered and login-walled, so
-  the result is a shell page, and presenting that as data is worse than saying
+- **Report what you tried and where it stopped.** Do not fall back to fetching
+  the search page over HTTP — it is client-rendered and login-walled, so the
+  result is a shell page, and presenting that as data is worse than saying
   "no browser available".
+- **Do not fall back to a host HTTP client for the JSON endpoints either.** It
+  appears to work for about a dozen calls, then risk control lands; that reads
+  like a dead session and sends you debugging the wrong thing.
 - **Never invent kernel paths.** If `cloakbrowser info` cannot be run, leave the
   placeholder and ask the user, or check for an existing install
   (`~/.cloakbrowser/chromium-*/chrome`).

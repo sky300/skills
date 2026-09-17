@@ -10,13 +10,29 @@ item detail, your own listing list and IM chat list — and, under the rules in
 "Writes", publishing listings, taking them down and sending messages.
 
 There is **no official open API and no OAuth app registration**. Access is a
-logged-in browser session exported as cookies, carried over one of two
-transports:
+logged-in browser session, and **every request is issued by the browser you
+already have open on the site** — never as a bare HTTP client from the agent's
+machine. Two read shapes, both inside that one browser:
 
-| Transport | Endpoint | Needs a browser? | Good for |
-|---|---|---|---|
-| mtop JSON API | `POST https://h5api.m.goofish.com/h5/{api}/{version}/` | **No** — plain HTTP + md5 sign | item detail, own listings, chat list, any named internal endpoint |
-| Rendered DOM | `https://www.goofish.com/search?q=…` | **Yes** | keyword search (the page is client-rendered) |
+| Shape | How | Good for |
+|---|---|---|
+| Rendered DOM | navigate `https://www.goofish.com/search?q=…`, read cards out of the page | keyword search (the page is client-rendered) |
+| In-page `fetch()` | sign the URL on the host, then call **`fetch()` inside the page** | item detail, own listings, chat list, any named internal endpoint, the publish/delete writes |
+
+**Why the browser must issue the call, not the host.** Measured on a real
+account (2026-09): the same signed read call, same session, same payload —
+
+| Issued from | Result |
+|---|---|
+| host HTTP client (`urllib`/`curl`/`requests`) | 11 calls fine, then `FAIL_SYS_USER_VALIDATE` + `RGV587_ERROR::SM::哎哟喂,被挤爆啦` at call 12 |
+| `fetch()` inside the open page | 12/12 `SUCCESS::调用成功` |
+
+The mtop endpoint is not "unusable over HTTP" — it accepts a well-formed signed
+request either way, which is exactly what makes the failure hard to read: the
+block arrives a dozen calls in, as risk control, and looks like a session
+problem. Driving the request from the page carries the browser's full fingerprint
+and same-origin context, and it is the difference between the two rows above.
+Signing is still host-side arithmetic; only the **send** moves into the browser.
 
 **Language:** every string in this skill — instructions, examples, and the
 wording suggested for asking the user — is English so the skill stays usable by
@@ -27,19 +43,20 @@ match what the site prints.
 
 ## What ships here, and why it is only that
 
-- `templates/mtop_request.py` — a copy-and-adapt template: cookies + api + data
-  in, a signed request out (optionally sent). Standard library only, and nothing
-  happens behind your back — no network unless you flip the switch, no browser,
-  no environment probing.
+- `templates/mtop_request.py` — a copy-and-adapt template: session cookies + api +
+  data in, **a signed URL and form body out** — ready to paste into `fetch()`
+  inside the page. Standard library only, and nothing happens behind your back:
+  it makes no network request at all, and it does not probe your environment.
 - `templates/publish_item.py` — listing publication: the payload assembly for the
   publish call (title/desc/images/price/delivery + the category and location the
   server returns), because those ~20 nested field names must be exact.
 - `templates/im_send_message.py` — chat messages, which travel over a WebSocket and
   not HTTP: the LWP frame sequence, with the parts only you can know marked.
 - Everything else is text: which endpoint answers which question, where the
-  response fields live, how to fire the request, how to search through your own
-  browser tool, how to tell a live session from a dead one, how to stand up a
-  browser tool if the user has none, and the rules that govern writes.
+  response fields live, how to inject the session into your browser tool, how to
+  search and fetch through that browser, how to tell a live session from a dead
+  one, how to stand up a browser tool if the user has none, and the rules that
+  govern writes.
 
 The split is deliberate, and worth preserving when editing this skill: **code
 only for the arithmetic that must be byte-exact every time; prose for everything
@@ -50,44 +67,50 @@ tools, and it can open a page. Keeping the code narrow is what lets this skill
 work on setups nobody anticipated.
 
 It is a **template rather than a finished tool with parameters** for the same
-reason. A fixed interface has to guess where your cookies live, which transport
-you have, and how you retry; a snippet you edit has to guess nothing. Copy it,
+reason. A fixed interface has to guess where your cookies live, which browser you
+drive, and how you retry; a snippet you edit has to guess nothing. Copy it,
 change the marked lines, run it.
 
 ## Workflow
 
-**1. Establish the session.** You need `unb` and `_m_h5_tk` from the user's
-Xianyu cookies. To check whether a session is actually alive:
+**1. Establish the session — in the browser.** Xianyu needs a logged-in browser
+session; the credentials are the site's own session cookies (`unb` and
+`_m_h5_tk` at minimum). Put the jar into your browser tool via whatever
+mechanism it has (a cookie-setting tool, a storage-state file, CDP
+`Network.setCookie`, or a profile the user already logged into), then confirm by
+**looking at the page**, not by calling an endpoint: open
+`https://www.goofish.com` and check for the account's own nickname.
 
-- if you have a browser tool, open `https://www.goofish.com` and look — a login
-  wall versus the account's own nickname is the ground truth, and it needs no
-  code;
-- without one, fire any signed read call and read `ret` (`SUCCESS::调用成功` means
-  live; the strings in `references/mtop-apis.md` mean expired or risk-blocked).
+A **read-only mtop call is the reliable session test** when the page is
+ambiguous (the site's header can keep rendering a `登录` control even with valid
+cookies injected, so "the header says log in" is not proof either way). Sign any
+read call and run it in-page; `SUCCESS::调用成功` means live, and the strings in
+`references/mtop-apis.md` mean expired or risk-blocked.
 
-**2. Pick the transport.** Anything except keyword search goes over mtop, which
-needs no browser at all. Search needs a rendered page — see
-`references/browser-search.md` for the extractor and the steps.
+**2. Search through the page.** Navigate to the search URL and read the cards
+from the DOM — `references/browser-search.md` carries the extractor and the
+steps.
 
-**3. Build and send.** Take the signed request from the template (or write the two
-lines yourself — the algorithm is below), then send it however your environment
-allows: `curl`, a Python `requests` call, or a `fetch()` inside a page
-you already have open on `www.goofish.com` (same cookies, same origin, so no CORS
-question). `references/mtop-apis.md` lists the endpoints, their payloads, and the
-field paths.
+**3. Everything else: sign on the host, fetch in the page.** Take the signed URL
+and body from the template (or write the two lines yourself — the algorithm is
+below), then execute it with `fetch()` inside a page you already have open on
+`www.goofish.com`. Same cookies, same origin, no CORS question, and the browser's
+fingerprint comes along. `references/mtop-apis.md` lists the endpoints, their
+payloads, the field paths, and the exact `fetch()` form.
 
-**4. If a browser is needed and you do not have one**, say so and ask the user for
-a browser tool rather than improvising. `references/browser-tool-setup.md` is
-written as instructions you can hand over or follow — including a CloakBrowser +
-Playwright MCP recipe, and what to report when it does not work.
+**4. If you do not have a browser tool**, say so and ask the user for one rather
+than improvising. `references/browser-tool-setup.md` is written as instructions
+you can hand over or follow — including a CloakBrowser + Playwright MCP recipe,
+and what to report when it does not work. Do **not** fall back to calling the API
+from the host: see the measurement above for what that costs.
 
 ## Signing a request
 
 Copy `templates/mtop_request.py` next to your work, adapt the three blocks marked
-`# EDIT` — where the cookies are, which api and payload, and whether this machine
-should send the request at all — then run it with whatever Python is available.
-Read it before running it: it is a starting point, not an interface, and the parts
-you change are the parts only you can know.
+`# EDIT` — where the cookies are, which api and payload, and the in-page `fetch()`
+snippet it prints — then run it with whatever Python is available. Read it before
+running it: it is a starting point, not an interface, and the parts you change are
+the parts only you can know.
 
 If you would rather write the call yourself, the whole algorithm is two lines:
 
@@ -101,10 +124,21 @@ sign = md5( <_m_h5_tk up to the first "_"> & t & 34839810 & data )
 - `_m_h5_tk` is `<token>_<timestamp>`; only the part before the first `_` is
   signed.
 
-**Token rotation:** the server hands out a fresh `_m_h5_tk` in `Set-Cookie` on
-most responses. Read it from the live jar every time — never cache the token in
-your own state. If a call returns a token-expired `ret`, the same response
-already carried the replacement: update the jar and retry once, then stop.
+**Which `_m_h5_tk` to sign with — read it from the browser, not from a file.** A
+jar can hold **more than one** `_m_h5_tk` for the same API host (the site sets
+them on both `.goofish.com` and `.taobao.com`, and both are sent to
+`h5api.m.goofish.com`). Only one is the live signing token; signing with the
+other returns `FAIL_SYS_ILLEGAL_ACCESS::非法请求`. So:
+
+- take the token from the browser's own cookie jar for the API host — i.e. the
+  cookies the browser will actually attach — not from a hand-assembled string;
+- `ILLEGAL_ACCESS` means wrong token, **not** risk control. Try the other
+  `_m_h5_tk` before concluding anything about the session or the account.
+
+**Token rotation:** the server hands out a fresh `_m_h5_tk` on most responses.
+Read it from the browser's live jar every time — never cache the token in your own
+state. If a call returns a token-expired `ret`, the same response already carried
+the replacement: update the jar and retry once, then stop.
 
 ## Writes
 
@@ -132,7 +166,7 @@ listing created without a price, message sent with a late ack). Read first.
 - Search listings by keyword (market prices, competitor listings, "is anyone
   selling this service" checks).
 - Read your own listings or chat/session list.
-- Any task where the answer lives in Xianyu's data and the user provides cookies.
+- Any task where the answer lives in Xianyu's data and the user provides a session.
 
 **Don't use for:**
 
@@ -142,18 +176,35 @@ listing created without a price, message sent with a late ack). Read first.
 - Anything without a logged-in session: Xianyu gates search and detail behind
   login, and anonymous requests get a login wall instead of data.
 
-## Handling the cookies
+## Handling the session cookies
 
 Required: **`unb`** and **`_m_h5_tk`**. Missing either means every request is
 treated as signed-out. Useful extras: `cookie2`, `_tb_token_`, `sgcookie`, `cna`.
 
-**Security:** a cookie file is a live account session. Keep it out of version
-control, out of chat logs, and out of the conversation; `chmod 600` it and put it
-somewhere short-lived if the user did not say otherwise. Afterwards, tell the user
-they can revoke it from the Xianyu app ("log out of all devices").
+Preferred home for the jar is **the browser tool's own session store** — a
+storage-state file, the cookie API, or the user's existing logged-in profile —
+because that is what the in-page `fetch()` sends. Keep a raw copy on disk only if
+the browser tool needs one to load.
+
+**Security:** the jar is a live account session. Keep it out of version control,
+out of chat logs, and out of the conversation; `chmod 600` any file holding it and
+put it somewhere short-lived if the user did not say otherwise. Afterwards, tell
+the user they can revoke it from the Xianyu app ("log out of all devices").
 
 ## Pitfalls
 
+- **A host-side HTTP client is not a supported transport.** Under a burst it gets
+  `RGV587` while the same call in-page does not (measured, see the table at the
+  top). If you catch yourself reaching for `curl`/`requests` because it is easier,
+  that is the failure mode this skill exists to prevent.
+- **`ILLEGAL_ACCESS` is a signing/token error, not risk control.** The jar can
+  carry two `_m_h5_tk` values for one host; the wrong one produces exactly this.
+  Do not report "blocked" or "session dead" on an `ILLEGAL_ACCESS` — retry with
+  the other token.
+- **The header's `登录` control is not a session indicator.** With valid cookies
+  injected via a tool, the page's own header can still render the logged-out
+  control. Verify with a read call's `ret`, or by a surface that truly gates on
+  login, rather than by that text.
 - **`baxia` in the page source is not a risk-control hit** — it is Alibaba's
   anti-bot JS library and appears on every page. Real markers:
   `哎哟喂`, `RGV587`, `FAIL_SYS_USER_VALIDATE`, `/punish`, or visible page text
@@ -180,10 +231,10 @@ they can revoke it from the Xianyu app ("log out of all devices").
 
 ## Files
 
-- `templates/mtop_request.py` — copy, adapt, run: signs an mtop request and can
-  send it.
+- `templates/mtop_request.py` — copy, adapt, run: signs an mtop request and emits
+  the in-page `fetch()` snippet.
 - `references/mtop-apis.md` — verified endpoints, payloads, response fields,
-  error codes, and account-risk notes.
+  error codes, the `fetch()` form, and account-risk notes.
 - `references/browser-search.md` — the search extractor and the browser steps, as
   text, for whichever browser tool you have.
 - `references/write-operations.md` — publish / delete / message recipes, the

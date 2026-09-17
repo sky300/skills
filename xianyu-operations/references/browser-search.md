@@ -1,10 +1,10 @@
-# Searching Xianyu through a browser tool
+# Reading Xianyu through a browser tool
 
-Keyword search is the one job that cannot be done over mtop: the search page is
-client-rendered, and Xianyu itself treats the browser path as the more robust
-one. Everything here is text and one JS snippet — there is no script for it,
-because *which* browser you drive, and how you inject cookies into it, depends on
-your environment.
+Two read shapes, **both inside the same browser session**: the search page is
+read from the rendered DOM (it is client-rendered, so there is no JSON to ask
+for), and every structured endpoint is reached with a `fetch()` issued *from
+inside the page* — never from the agent's host. The transport rule and the
+measurement behind it are in `mtop-apis.md`.
 
 ## Preconditions
 
@@ -16,9 +16,10 @@ your environment.
    cookie-setting tool, CDP `Network.setCookie`, or a profile the user already
    logged into. You need `unb` and `_m_h5_tk` at minimum, but injecting the whole
    Xianyu jar is closer to a real browser.
-3. Confirm the session by looking: open `https://www.goofish.com` first. The
-   account's nickname in the header means logged in; a login wall means the
-   cookies are dead and there is no point searching yet.
+3. Confirm the session **with a read call**, not by reading the header: the site's
+   header can keep showing a `登录` control even with valid cookies injected.
+   Navigate to `https://www.goofish.com`, then sign any read call and run it
+   in-page — `SUCCESS::调用成功` is the answer.
 
 ## Steps
 
@@ -94,5 +95,5 @@ page text for diagnosis.
   suspect — dump the DOM and re-derive rather than guessing at other causes.
 - The risk-control alternation above is verbatim site text; it has to stay in
   Chinese to match.
-- Item ids from the search cards feed straight into the mtop detail call
-  (`references/mtop-apis.md`), which needs no browser at all.
+- Item ids from the search cards feed straight into the in-page detail call
+  (`references/mtop-apis.md`) — same browser, same session, signed on the host.

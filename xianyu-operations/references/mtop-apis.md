@@ -27,10 +27,52 @@ Body (form-encoded): data={"compact":"json"}
 `sign = md5(token & t & 34839810 & data)` where `token` is the `_m_h5_tk` cookie
 up to the first `_`.
 
-`templates/mtop_request.py` builds this request for you — copy it, adapt the
-marked lines, run it (stdlib only; it sends nothing unless you tell it to).
-Sending it is your call — `curl`, `requests`, or a `fetch()` from a page already
-open on `www.goofish.com` (same cookies, same origin).
+## How to send it — in the page, not from the host
+
+Sign on the host (that is pure arithmetic), then run the request **inside the
+browser**, in a page you already have open on `www.goofish.com`. Verified form:
+
+```js
+async (url, body) => {
+  const res = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',                                  // sends the page's cookies
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,                                                    // "data=" + encodeURIComponent(json)
+  });
+  return await res.json();                                   // { api, v, ret, data }
+}
+```
+
+Call it with the signed URL and `data=<urlencoded compact JSON>`.
+
+**Do not issue this from the agent's host** (`curl`, `requests`, `urllib`). Same
+session, same signed call, measured 2026-09:
+
+| Issued from | Result |
+|---|---|
+| host HTTP client | 11 calls fine → `FAIL_SYS_USER_VALIDATE` + `RGV587_ERROR::SM::哎哟喂,被挤爆啦` at call 12 |
+| `fetch()` in the open page | 12 / 12 `SUCCESS::调用成功` |
+
+The endpoint accepts a host-side request — that is what makes this expensive to
+learn: it works, then a dozen calls later risk control lands, and it reads like a
+broken session. The in-page call carries the browser's fingerprint and
+same-origin context instead.
+
+### Finding the token to sign with
+
+A jar can hold **two different `_m_h5_tk` values that both go to
+`h5api.m.goofish.com`** — the site sets them on `.goofish.com` and on
+`.taobao.com`. Only one is the live signing token; the other yields
+`FAIL_SYS_ILLEGAL_ACCESS::非法请求`.
+
+So read the token from the browser's own jar for the API host — the cookies the
+browser will actually attach — rather than from a hand-assembled string. In a
+browser tool, that is its cookie API scoped to the API URL, e.g.
+`context.cookies('https://h5api.m.goofish.com/')`, then take `_m_h5_tk` and keep
+the part before the first `_`. If a call returns `ILLEGAL_ACCESS`, try the other
+`_m_h5_tk` before concluding anything about the session: it is a token mismatch,
+**not** risk control.
 
 On a token-expired `ret`, the response already carries a fresh `_m_h5_tk` in
 `Set-Cookie`: update the jar and retry **once**. That is the only retry policy
@@ -49,7 +91,9 @@ Response envelope:
 | `SUCCESS` | ok |
 | `FAIL_SYS_TOKEN_EXOIRED` / `FAIL_SYS_SESSION_EXPIRED` | stale `_m_h5_tk` / session cookie — the server also sends a fresh one via `Set-Cookie`; re-read the jar and retry once |
 | `FAIL_SYS_USER_VALIDATE`, `RGV587_ERROR`, `/punish` in the body, `哎哟喂` | risk control. Back off; retrying immediately makes it worse |
-| `FAIL_SYS_ILLEGAL_ACCESS` | risk-control level rejection; refreshing cookies does not help |
+| `FAIL_SYS_ILLEGAL_ACCESS` | **signing/token mismatch, not risk control.** The jar can hold two `_m_h5_tk` values for the API host and only one signs correctly — re-sign with the other before blaming the session. Refreshing cookies does not fix a wrong-token sign |
+
+Note that `FAIL_SYS_TOKEN_EXOIRED` is the server's own spelling of "expired".
 
 ## Verified endpoints
 
@@ -131,10 +175,27 @@ from-scratch reimplementation with no runtime dependency on that project.
 
 ## Account-risk notes
 
-- Read-only item/search calls have been stable under human-paced use.
+- **The transport is the first-order risk factor, not the call rate.** The same
+  signed read call that survives 12/12 in-page got `RGV587` at call 12 from a
+  host HTTP client (measured 2026-09). Fix the transport before tuning pacing.
+- Read-only item/search calls have been stable under human-paced use **from the
+  page**.
 - Publish / send-message / delete are the sensitive surface. The upstream
   `goofish-cli` project ships a rate limiter (1 write/minute by default) and a
   circuit breaker that voluntarily pauses 10 minutes when it sees risk-control
   keywords — treat that as the floor for pacing, not a target.
 - A limited or banned account is the cost of over-automation. Keep write actions
   manual and human-triggered.
+
+## Verification status (2026-09)
+
+Checked live against a real logged-in account from an agent browser tool:
+
+| Path | Status |
+|---|---|
+| search + pagination via rendered DOM | working — 30 cards/page, 40+ pages walked, zero risk-control hits |
+| item detail via in-page `fetch()` | working — `data.itemDO.title` / `soldPrice` / `browseCnt` read back |
+| own listings (`mtop.idle.web.xyh.item.list`) via in-page `fetch()` | working — `data.cardList[]` returned |
+| the same calls from a host HTTP client | **degrades to `RGV587` under burst** — do not use |
+| IM endpoints (`…loginuser.get`, `…session.sync`) via in-page `fetch()` | returned `FAIL_SYS_SESSION_EXPIRED` when probed; **not exercised successfully** — treat as unverified |
+| publish / delete / WebSocket messaging | transcribed from upstream, not run against a live account |

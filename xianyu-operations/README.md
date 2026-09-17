@@ -7,14 +7,12 @@ keyword search, item detail, your own listings and IM sessions — plus publishi
 taking listings down and sending messages (writes, each one approved by the user).
 
 Xianyu has no open API and no OAuth registration, so access is a logged-in
-browser session exported as cookies. The skill carries it over two transports —
-whichever your environment can support:
-
-- **mtop JSON API over plain HTTP** (no browser): item detail, own listings,
-  chat list, and any other internal mtop endpoint you name.
-- **Rendered DOM in a browser**: keyword search, because the search page is
-  client-rendered and the site itself treats the browser path as the more robust
-  one.
+browser session. **Every request is issued by the browser** — the search page is
+read from the rendered DOM, and the structured endpoints are reached with a
+`fetch()` fired from inside a page already open on the site. Calling the API from
+a host HTTP client is not a supported transport: it works for about a dozen calls
+and then trips Alibaba's risk control (`RGV587`), which reads like a dead session.
+Signing stays host-side arithmetic; only the send belongs to the browser.
 
 ## Install
 
@@ -26,21 +24,21 @@ Or copy the directory into your agent's skills folder.
 
 ## What is in here
 
-One template and three reference documents:
+Three templates and four reference documents:
 
 | File | Role |
 |---|---|
-| `templates/mtop_request.py` | A copy-and-adapt snippet: signs an mtop request (and can send it). **Standard library only**, no network unless you enable it |
+| `templates/mtop_request.py` | A copy-and-adapt snippet: signs an mtop request and prints the exact `fetch()` call to run in the page. **Standard library only**, no network at all |
 | `templates/publish_item.py` | Payload assembly for publishing a listing (images, price, delivery, category, location) |
 | `templates/im_send_message.py` | Chat messages over the WebSocket gateway: the LWP frame sequence (needs `websockets`) |
-| `references/mtop-apis.md` | Verified endpoints, payloads, field paths, error codes, risk notes |
+| `references/mtop-apis.md` | Verified endpoints, payloads, field paths, error codes, the in-page `fetch()` form, risk notes |
 | `references/browser-search.md` | The search extractor and browser steps, as text |
 | `references/write-operations.md` | Publish / take-down / message recipes, and the rules that govern writes |
 | `references/browser-tool-setup.md` | How to stand up a browser tool when the machine has none |
 
 The narrow code is intentional, and it is a template rather than a tool: it
 computes the one thing that must be byte-exact, and lets you edit where your
-cookies live, which transport you have, and how you retry. Everything that
+session lives, which browser you drive, and how you retry. Everything that
 depends on the environment or on judgement stays in prose, so the agent adapts
 instead of waiting for the skill to support its setup.
 
@@ -48,28 +46,27 @@ instead of waiting for the skill to support its setup.
 
 - Python 3 (any recent version). No third-party packages: not `requests`, not
   `playwright`.
-- A logged-in Xianyu session exported as cookies (`unb` and `_m_h5_tk` are
-  mandatory).
-- A browser tool **only if you need keyword search** — the agent's own browser
-  tool if it has one (with any way to inject cookies), otherwise one set up per
-  `references/browser-tool-setup.md`. Item detail, listings and chats need no
-  browser at all.
+- A logged-in Xianyu session (`unb` and `_m_h5_tk` are mandatory), loaded into
+  the browser tool.
+- A browser tool with three abilities: navigate and read the rendered DOM,
+  evaluate JS in the page, and inject cookies (any mechanism — cookie API,
+  storage-state file, CDP, or a profile the user already logged into). If the
+  environment has none, set one up per `references/browser-tool-setup.md`.
 
 ## Usage
 
 ```bash
 cp templates/mtop_request.py ./mtop_request.py
-$EDITOR mtop_request.py     # three marked blocks: cookies, api/payload, send-or-not
+$EDITOR mtop_request.py     # three marked blocks: session source, api/payload, fetch shape
 python3 mtop_request.py
 ```
 
-It prints the URL, query string, form body and starting headers (and posts it if
-you set `SEND = True`). Send the result with `curl`, `requests`, or a `fetch()`
-from a page already open on `www.goofish.com`. Then read
-`references/mtop-apis.md` for how the response is shaped; item data lives under
-`data.itemDO`.
+It prints the signed URL, the form body, and a ready-to-run `fetch()` snippet.
+Run that snippet in a page already open on `www.goofish.com`; the browser issues
+the call and returns the JSON. Then read `references/mtop-apis.md` for how the
+response is shaped — item data lives under `data.itemDO`.
 
-Keyword search is a browser job: follow `references/browser-search.md`, which
+Keyword search is a browser job too: follow `references/browser-search.md`, which
 carries the extractor and the steps.
 
 ## Writes

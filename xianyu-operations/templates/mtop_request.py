@@ -1,18 +1,27 @@
 #!/usr/bin/env python3
 """TEMPLATE — copy this file next to your work, adapt the EDIT lines, then run it.
 
-It signs one mtop call for Goofish/Xianyu and (optionally) sends it. This is a
-starting point, not an interface: read it, change what your environment needs,
-run it. Nothing here needs third-party packages.
+It signs one mtop call for Goofish/Xianyu and prints the exact material for an
+in-page `fetch()`: the URL to call and the form body to pass. This is a starting
+point, not an interface: read it, change what your environment needs, run it.
+Nothing here needs third-party packages.
+
+**The send happens in the browser, not here.** A host HTTP client reaches the
+endpoint and looks fine for roughly a dozen calls, then the server answers
+`FAIL_SYS_USER_VALIDATE` / `RGV587_ERROR` — risk control, which reads like a dead
+session. Issued as a `fetch()` from a page already open on www.goofish.com, the
+same signed call does not trip it. Signing is host-side arithmetic; sending is
+the browser's job. There is deliberately no `SEND` switch.
 
 Three things are environment-specific, marked with `# EDIT`:
 
-  1. COOKIES — where the user's session is. A raw "k=v; k=v" string, or a file
-     holding one (raw, a JSON list from DevTools/Cookie-Editor, or a flat dict).
+  1. COOKIES — where the user's session is. A raw "k=v; k=v" string, or a path to
+     a file holding one (raw, a JSON list from DevTools/Cookie-Editor, or a flat
+     dict). Prefer asking your browser tool for the jar scoped to the API host
+     (there can be two `_m_h5_tk` values; only one signs correctly — see below).
   2. API / DATA — which endpoint and payload. See references/mtop-apis.md.
-  3. SEND — whether to fire the request from here. If this machine cannot send
-     HTTP, leave it False and paste the printed request into a fetch() inside a
-     page you already have open on www.goofish.com.
+  3. FETCH — how your browser tool takes a snippet. It prints a ready-to-run
+     `fetch()` call; which tool call wraps it differs per environment.
 
 Two functions at the bottom are the whole algorithm; keep them if you rewrite
 the rest:
@@ -31,8 +40,10 @@ from pathlib import Path
 
 # ---------------------------------------------------------------- EDIT 1: cookies
 COOKIES = ""            # raw string, or a path to a file holding one
-# e.g. COOKIES = "unb=2207410505407; _m_h5_tk=ffae47a5..._1789637526019"
-# or   COOKIES = "/tmp/xianyu-cookies.txt"
+# A jar can carry TWO `_m_h5_tk` values that both go to h5api.m.goofish.com (set
+# on .goofish.com and on .taobao.com). Only one is the live signing token; the
+# other answers FAIL_SYS_ILLEGAL_ACCESS. If that comes back, re-run with the other
+# token before suspecting the session.
 
 # ------------------------------------------------------------- EDIT 2: the call
 API = "mtop.taobao.idle.pc.detail"
@@ -42,24 +53,27 @@ SPM = "a21ybx.item.0.0"        # page token; see references/mtop-apis.md
 APP_KEY = "34839810"           # Xianyu web appKey — a protocol constant
 MTOP_HOST = "https://h5api.m.goofish.com"
 
-# ------------------------------------------------------------- EDIT 3: sending
-SEND = False                   # True -> POST it here; False -> just print it
-HEADERS = {
-    "accept": "application/json",
-    "content-type": "application/x-www-form-urlencoded",
-    "origin": "https://www.goofish.com",
-    "referer": "https://www.goofish.com/",
-    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-}
+# ------------------------------------------------------------- EDIT 3: the fetch
+# The snippet below is printed for you to run inside the page. Nothing to fill in
+# unless your browser tool needs a different shape (some take a function to
+# evaluate, some take `url` + `body` separately):
+FETCH_SNIPPET = """async (url, body) => {
+  const res = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  return await res.json();
+}"""
 
 
 # ------------------------------------------------------------------- the maths
 def h5_token(jar: dict[str, str]) -> str:
     """Everything before the first '_' in _m_h5_tk (the cookie is <token>_<ts>).
 
-    The server rotates it via Set-Cookie on most responses: re-read it from the
-    live jar every call rather than caching it anywhere.
+    The server rotates it on most responses: re-read it from the live jar every
+    call rather than caching it anywhere.
     """
     return (jar.get("_m_h5_tk") or "").split("_")[0]
 
@@ -91,7 +105,7 @@ def load_cookies(source: str) -> dict[str, str]:
 
 
 def build(jar: dict[str, str], api: str, data, version: str, spm: str) -> dict:
-    """The signed request: URL, query params, form body, headers."""
+    """The signed request: URL, query params, and the form body for the page."""
     from urllib.parse import urlencode
     payload = (data if isinstance(data, str)
                else json.dumps(data, separators=(",", ":"), ensure_ascii=False))
@@ -105,22 +119,10 @@ def build(jar: dict[str, str], api: str, data, version: str, spm: str) -> dict:
         "sessionOption": "AutoLoginOnly", "spm_cnt": spm,
     }
     return {
-        "url": f"{MTOP_HOST}/h5/{api}/{version}/",
-        "query_string": urlencode(query),
-        "body": f"data={urlencode({'data': payload})[5:]}",
-        "headers": dict(HEADERS),
+        "url": f"{MTOP_HOST}/h5/{api}/{version}/?{urlencode(query)}",
+        "body": "data=" + urlencode({"data": payload})[5:],
         "t": t_ms, "token": token,
     }
-
-
-def send(req: dict) -> str:
-    """POST it from here. Swap in whatever this machine actually has."""
-    import urllib.request
-    body = req["body"].encode()
-    http = urllib.request.Request(f"{req['url']}?{req['query_string']}",
-                                  data=body, headers=req["headers"], method="POST")
-    with urllib.request.urlopen(http, timeout=30) as r:
-        return f"HTTP {r.status}\n" + r.read().decode("utf-8", "replace")[:2000]
 
 
 if __name__ == "__main__":
@@ -128,10 +130,10 @@ if __name__ == "__main__":
     if not h5_token(jar):
         print("! _m_h5_tk missing — this request will be treated as signed-out.")
     req = build(jar, API, DATA, VERSION, SPM)
-    print(json.dumps({k: req[k] for k in ("url", "query_string", "body", "headers")},
-                     ensure_ascii=False, indent=2))
-    if SEND:
-        out = send(req)
-        print("\n--- response ---\n" + out)
-        # A rotated _m_h5_tk arrives in Set-Cookie on the way back; if the ret says
-        # the token expired, update the jar and retry ONCE. Do not loop.
+    print(json.dumps({"url": req["url"], "body": req["body"]}, ensure_ascii=False, indent=2))
+    print("\n--- run this in a page you already have open on www.goofish.com ---")
+    print(FETCH_SNIPPET)
+    print(f"// ...called with (url, body) above")
+    print("\n# If ret says the token expired, the response carried a fresh _m_h5_tk:")
+    print("# update the jar and retry ONCE. If it says ILLEGAL_ACCESS, re-sign with")
+    print("# the other _m_h5_tk from the jar. Do not loop.")
