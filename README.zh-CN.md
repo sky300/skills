@@ -45,4 +45,4 @@ quadlet-creator/          # SKILL.md + references/ + templates/ + README
 video-edit-planner/       # SKILL.md + references/ + scripts/ + README
 ```
 
-其中若干技能原以独立仓库维护，现已合并到本仓库。
+其中若干技能原以独立仓库维护（那些仓库已归档并删除），现已合并到本仓库。

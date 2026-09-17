@@ -47,4 +47,4 @@ quadlet-creator/          # SKILL.md + references/ + templates/ + README
 video-edit-planner/       # SKILL.md + references/ + scripts/ + README
 ```
 
-Several of these skills were previously maintained as standalone repositories and were consolidated here.
+Several of these skills were previously maintained as standalone repositories (now archived and deleted) and were consolidated here.
