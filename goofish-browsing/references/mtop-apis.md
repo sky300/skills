@@ -62,7 +62,18 @@ Response envelope:
 | `mtop.taobao.idlemessage.pc.loginuser.get` | 1.0 | `{}` | IM-side user info |
 | `mtop.taobao.idlemessage.pc.login.token` | 1.0 | app/device scoped (see upstream) | WebSocket access token for the IM long connection. **Most risk-guarded call of the set** |
 | `mtop.taobao.idle.local.poi.get` | 1.0 | location scoped | Local POI lookup |
-| `mtop.idle.pc.idleitem.publish` | 1.0 | publish payload | Listing creation — **write path, not implemented in this skill** |
+| `mtop.idle.pc.idleitem.publish` | 1.0 | the ~20-field payload assembled in `templates/publish_item.py` | **Write.** Listing creation; returns `data.itemId` |
+| `com.taobao.idle.item.delete` | 1.1 | `{"itemId":"<id>"}` | **Write.** Takes a listing down |
+| `mtop.taobao.idle.kgraph.property.recommend` | 2.0 | `{"title":…,"lockCpv":false,"multiSKU":false,"publishScene":"mainPublish","scene":"newPublishChoice","description":…,"imageInfos":[…],"uniqueCode":…}` | Category prediction for the publish form; result at `data.categoryPredictResult` |
+| `mtop.taobao.idle.local.poi.get` | 1.0 | `{"longitude":…,"latitude":…}` | Posting location; result at `data.commonAddresses[]` / `data.selectedPoi` |
+
+Image upload for listings is **not** mtop: `POST
+https://stream-upload.goofish.com/api/upload.api?floderId=0&appkey=xy_chat&_input_charset=utf-8`
+with a multipart `file` field, cookies attached, no signature. Returns
+`object.url` / `object.pix` ("1024x1024") / `object.size`.
+
+The write recipes — the call order, the approval/pacing rules and the WebSocket
+message path — are in `references/write-operations.md`.
 
 ## Field paths for item detail
 

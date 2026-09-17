@@ -1,12 +1,13 @@
 ---
 name: goofish-browsing
-description: "Use when reading Xianyu/Goofish (闲鱼) data: search, item detail, own listings, chats."
+description: "Use when reading or writing Xianyu/Goofish (闲鱼): search, item detail, own listings, chats, publish, message."
 ---
 
 # Goofish / Xianyu Browsing
 
-Read-only access to Xianyu (闲鱼, Goofish), Alibaba's second-hand marketplace:
-keyword search, item detail, your own listing list, and your IM chat list.
+Access to Xianyu (闲鱼, Goofish), Alibaba's second-hand marketplace: keyword search,
+item detail, your own listing list and IM chat list — and, under the rules in
+"Writes", publishing listings, taking them down and sending messages.
 
 There is **no official open API and no OAuth app registration**. Access is a
 logged-in browser session exported as cookies, carried over one of two
@@ -30,10 +31,15 @@ match what the site prints.
   in, a signed request out (optionally sent). Standard library only, and nothing
   happens behind your back — no network unless you flip the switch, no browser,
   no environment probing.
+- `templates/publish_item.py` — listing publication: the payload assembly for the
+  publish call (title/desc/images/price/delivery + the category and location the
+  server returns), because those ~20 nested field names must be exact.
+- `templates/im_send_message.py` — chat messages, which travel over a WebSocket and
+  not HTTP: the LWP frame sequence, with the parts only you can know marked.
 - Everything else is text: which endpoint answers which question, where the
   response fields live, how to fire the request, how to search through your own
   browser tool, how to tell a live session from a dead one, how to stand up a
-  browser tool if the user has none.
+  browser tool if the user has none, and the rules that govern writes.
 
 The split is deliberate, and worth preserving when editing this skill: **code
 only for the arithmetic that must be byte-exact every time; prose for everything
@@ -100,6 +106,26 @@ most responses. Read it from the live jar every time — never cache the token i
 your own state. If a call returns a token-expired `ret`, the same response
 already carried the replacement: update the jar and retry once, then stop.
 
+## Writes
+
+Publishing a listing, taking one down, and sending chat messages are all covered —
+`references/write-operations.md` carries the recipes and `templates/` carries the
+two payload/socket builders. Three rules come with them, and they are not
+optional:
+
+1. **Explicit user approval for the exact content before every write.** Draft the
+   title/description/price, or the message text, show it to the user, wait for a
+   yes. Nothing visible to others goes out because you decided it should.
+2. **Human pacing — roughly one write per minute, and at most one session writing
+   at a time.** The upstream project ships exactly that as its default limiter plus
+   a 10-minute circuit breaker on risk-control keywords; treat it as the floor.
+3. **Verify by reading back.** A `SUCCESS` ret or an ack `code=200` means the
+   server accepted the request, not that the listing is live or the message was
+   delivered. Re-read, then report what you actually see.
+
+Never blind-retry a write: a failed attempt may have half-landed (images uploaded,
+listing created without a price, message sent with a late ack). Read first.
+
 ## When to Use
 
 - Look up Xianyu item details or prices by item id.
@@ -110,8 +136,9 @@ already carried the replacement: update the jar and retry once, then stop.
 
 **Don't use for:**
 
-- Writing (publishing, sending messages, deleting listings). Those sit behind the
-  account's risk-control frontier and are out of scope here — see "Pitfalls".
+- Writes without the user's explicit approval for the exact content. Publishing
+  and messaging are supported — see "Writes" — but nothing visible to others goes
+  out on your own judgement, and nothing here does bulk or automated outreach.
 - Anything without a logged-in session: Xianyu gates search and detail behind
   login, and anonymous requests get a login wall instead of data.
 
@@ -144,11 +171,12 @@ they can revoke it from the Xianyu app ("log out of all devices").
   release-stable approach.
 - **Rate and risk limits:** the IM-token endpoint
   (`mtop.taobao.idlemessage.pc.login.token`) is the most heavily guarded; the
-  upstream project's own notes say frequent calls trigger `RGV587`. Read-only
-  item and search calls are far more forgiving, but keep everything human-paced.
-- **Write operations (publish / send message / delete) are deliberately not
-  covered.** They are where accounts get limited or banned. If a user asks for
-  them, say that plainly instead of improvising requests.
+  upstream project's own notes say frequent calls trigger `RGV587`. Read-type item
+  and search calls are far more forgiving, but keep everything human-paced.
+- **Writes are where accounts get limited or banned.** They are supported here,
+  but only under the approval/pacing/read-back rules above. The IM token endpoint
+  (`mtop.taobao.idlemessage.pc.login.token`) is the single most guarded call in the
+  API surface — fetch it once and cache it rather than per message.
 
 ## Files
 
@@ -158,8 +186,12 @@ they can revoke it from the Xianyu app ("log out of all devices").
   error codes, and account-risk notes.
 - `references/browser-search.md` — the search extractor and the browser steps, as
   text, for whichever browser tool you have.
+- `references/write-operations.md` — publish / delete / message recipes, the
+  WebSocket sequence, and the rules that govern them.
 - `references/browser-tool-setup.md` — how to stand up a browser tool when the
   environment has none.
+- `templates/mtop_request.py`, `templates/publish_item.py`,
+  `templates/im_send_message.py` — copy, adapt, run.
 
 API names, request shapes, and the search extractor were cross-checked against the
 upstream project

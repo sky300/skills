@@ -2,8 +2,9 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-Read-only [Xianyu (闲鱼 / Goofish)](https://www.goofish.com) data for AI agents:
-keyword search, item detail, your own listings, and your IM session list.
+[Xianyu (闲鱼 / Goofish)](https://www.goofish.com) operations for AI agents:
+keyword search, item detail, your own listings and IM sessions — plus publishing,
+taking listings down and sending messages (writes, each one approved by the user).
 
 Xianyu has no open API and no OAuth registration, so access is a logged-in
 browser session exported as cookies. The skill carries it over two transports —
@@ -30,8 +31,11 @@ One template and three reference documents:
 | File | Role |
 |---|---|
 | `templates/mtop_request.py` | A copy-and-adapt snippet: signs an mtop request (and can send it). **Standard library only**, no network unless you enable it |
+| `templates/publish_item.py` | Payload assembly for publishing a listing (images, price, delivery, category, location) |
+| `templates/im_send_message.py` | Chat messages over the WebSocket gateway: the LWP frame sequence (needs `websockets`) |
 | `references/mtop-apis.md` | Verified endpoints, payloads, field paths, error codes, risk notes |
 | `references/browser-search.md` | The search extractor and browser steps, as text |
+| `references/write-operations.md` | Publish / take-down / message recipes, and the rules that govern writes |
 | `references/browser-tool-setup.md` | How to stand up a browser tool when the machine has none |
 
 The narrow code is intentional, and it is a template rather than a tool: it
@@ -68,11 +72,13 @@ from a page already open on `www.goofish.com`. Then read
 Keyword search is a browser job: follow `references/browser-search.md`, which
 carries the extractor and the steps.
 
-## What it does not do
+## Writes
 
-Publishing, sending messages, and deleting listings are intentionally absent.
-Those calls sit behind the account's risk-control frontier and can get an account
-limited; doing them from an agent without a human in the loop is not worth it.
+Publishing a listing, taking one down and sending chat messages are supported,
+under three rules: **the user approves the exact content first**, writes stay at
+roughly one per minute, and every write is verified by reading it back (a
+`SUCCESS` ret means accepted, not live). No bulk actions and no automated
+outreach — that is where accounts get limited.
 
 ## Security
 
