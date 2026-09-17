@@ -11,7 +11,7 @@
 - **[discord-user-operations](./discord-user-operations/)** — 以普通用户身份操作 Discord：读取、搜索、发帖。
 - **[china-weather-query](./china-weather-query/)** — 用中国气象局官方数据查国内天气：实况、预报、预警、空气质量。
 - **[chinese-humanizer](./chinese-humanizer/)** — 中文表述拟人化：去掉简体中文里的公文腔、名词化、翻译腔与模板节奏，保留事实、术语与作者声口。
-- **[goofish-browsing](./goofish-browsing/)** — 闲鱼（Goofish）操作：关键词搜索、商品详情、自己的商品列表、消息会话，以及发布/下架商品与发消息（写操作需用户逐次同意）。mtop JSON 接口走纯 HTTP，只有搜索需要浏览器。
+- **[xianyu-operations](./xianyu-operations/)** — 闲鱼（Goofish）操作：关键词搜索、商品详情、自己的商品列表、消息会话，以及发布/下架商品与发消息（写操作需用户逐次同意）。mtop JSON 接口走纯 HTTP，只有搜索需要浏览器。
 
 ## 安装
 
@@ -40,7 +40,7 @@ npx skills add https://git.nite07.com/nite/skills.git --list
 china-weather-query/      # SKILL.md + references/ + scripts/ + tests/ + README
 chinese-humanizer/        # SKILL.md + references/ + README
 discord-user-operations/  # SKILL.md + references/ + README
-goofish-browsing/         # SKILL.md + references/ + templates/ + README
+xianyu-operations/        # SKILL.md + references/ + templates/ + README
 quadlet-creator/          # SKILL.md + references/ + templates/ + README
 video-edit-planner/       # SKILL.md + references/ + scripts/ + README
 ```

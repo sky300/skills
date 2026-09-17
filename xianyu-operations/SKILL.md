@@ -1,5 +1,5 @@
 ---
-name: goofish-browsing
+name: xianyu-operations
 description: "Use when reading or writing Xianyu/Goofish (闲鱼): search, item detail, own listings, chats, publish, message."
 ---
 

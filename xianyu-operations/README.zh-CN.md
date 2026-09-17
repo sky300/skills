@@ -1,4 +1,4 @@
-# goofish-browsing 闲鱼取数
+# xianyu-operations
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
@@ -12,7 +12,7 @@
 ## 安装
 
 ```bash
-npx skills add https://git.nite07.com/nite/skills.git -g -s goofish-browsing
+npx skills add https://git.nite07.com/nite/skills.git -g -s xianyu-operations
 ```
 
 或直接把目录拷进你的 agent skills 目录。

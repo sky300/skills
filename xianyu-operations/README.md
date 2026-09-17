@@ -1,4 +1,4 @@
-# goofish-browsing
+# xianyu-operations
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
@@ -19,7 +19,7 @@ whichever your environment can support:
 ## Install
 
 ```bash
-npx skills add https://git.nite07.com/nite/skills.git -g -s goofish-browsing
+npx skills add https://git.nite07.com/nite/skills.git -g -s xianyu-operations
 ```
 
 Or copy the directory into your agent's skills folder.

@@ -11,7 +11,7 @@ A collection of agent skills for the [open agent skills ecosystem](https://www.n
 - **[discord-user-operations](./discord-user-operations/)** — Operate Discord as a regular user account: read, search, and post.
 - **[china-weather-query](./china-weather-query/)** — China weather from CMA official data: observation, forecast, warnings, AQI.
 - **[chinese-humanizer](./chinese-humanizer/)** — Strip the AI flavor out of Simplified Chinese prose: stock phrases, nominalization, translationese sentence structure, template rhythm; keeps facts, terminology, and the author's voice.
-- **[goofish-browsing](./goofish-browsing/)** — Xianyu (闲鱼 / Goofish) operations: keyword search, item detail, own listings, IM sessions — plus publishing, taking listings down and sending messages, each write approved by the user. mtop JSON API over plain HTTP, with a browser path only for search.
+- **[xianyu-operations](./xianyu-operations/)** — Xianyu (闲鱼 / Goofish) operations: keyword search, item detail, own listings, IM sessions — plus publishing, taking listings down and sending messages, each write approved by the user. mtop JSON API over plain HTTP, with a browser path only for search.
 
 ## Installation
 
@@ -42,7 +42,7 @@ Each top-level directory is one self-contained skill (`SKILL.md` plus optional s
 china-weather-query/      # SKILL.md + references/ + scripts/ + tests/ + README
 chinese-humanizer/        # SKILL.md + references/ + README
 discord-user-operations/  # SKILL.md + references/ + README
-goofish-browsing/         # SKILL.md + references/ + templates/ + README
+xianyu-operations/        # SKILL.md + references/ + templates/ + README
 quadlet-creator/          # SKILL.md + references/ + templates/ + README
 video-edit-planner/       # SKILL.md + references/ + scripts/ + README
 ```
