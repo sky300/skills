@@ -1,0 +1,39 @@
+[project]
+name = "funasr-script"
+version = "0.1.0"
+description = "Small local FunASR transcription scripts for extracting a video audio track and writing JSON transcripts."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "funasr>=1.3.29",
+    "soundfile>=0.13.1",
+    "torch>=2.13.0",
+    "torchaudio>=2.11.0",
+]
+
+[project.scripts]
+funasr-script = "funasr_nano:main"
+funasr-nano = "funasr_nano:main"
+funasr-fast = "funasr_fast:main"
+funasr-regular = "funasr_regular:main"
+merge-emotion = "merge_emotion:main"
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchaudio = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["funasr_common", "funasr_regular", "funasr_fast", "funasr_nano", "merge_emotion", "main"]

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# uv
+scripts/transcription/.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+
+# Index files (runtime artifacts, not source)
+*.vedit.json
+
+# Extracted clips and frames (runtime artifacts)
+*_clips/
+*_frames/
+
+# Showinfo logs
+showinfo.log
