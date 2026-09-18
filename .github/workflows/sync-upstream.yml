@@ -1,0 +1,105 @@
+name: Sync upstream source
+
+on:
+  schedule:
+    # 每天香港时间 03:17 执行，避开整点的 Actions 高峰期。
+    - cron: "17 3 * * *"
+      timezone: "Asia/Hong_Kong"
+  workflow_dispatch:
+
+# 防止定时任务与手动任务同时修改仓库。
+concurrency:
+  group: sync-upstream-source
+  cancel-in-progress: false
+
+# 只授予同步源码所需的仓库写权限。
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Mirror source branches and tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Synchronize upstream repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          UPSTREAM_URL: https://git.nite07.com/nite/skills.git
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # 使用本次任务的短期令牌，不保存长期访问密钥。
+          auth_header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w 0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth_header" \
+            clone --no-tags "https://github.com/${TARGET_REPOSITORY}.git" repository
+
+          cd repository
+          git config http.https://github.com/.extraheader "AUTHORIZATION: basic $auth_header"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_URL"
+
+          # 获取上游的全部分支和标签；不会执行上游仓库中的任何脚本。
+          git fetch --prune --force upstream \
+            "+refs/heads/*:refs/remotes/upstream/*" \
+            "+refs/tags/*:refs/tags/*"
+
+          # GitHub 的定时工作流必须存在于默认分支。
+          # main 的文件内容以 upstream/main 为准，但保留本同步工作流；
+          # 同时把 upstream/main 作为父提交，确保上游提交历史完整可追溯。
+          workflow_file=".github/workflows/sync-upstream.yml"
+          workflow_copy="$(mktemp)"
+          cp "$workflow_file" "$workflow_copy"
+
+          git checkout main
+          current_commit="$(git rev-parse HEAD)"
+          upstream_commit="$(git rev-parse refs/remotes/upstream/main)"
+          git read-tree --reset -u refs/remotes/upstream/main
+          mkdir -p "$(dirname "$workflow_file")"
+          cp "$workflow_copy" "$workflow_file"
+          git add --all
+
+          current_tree="$(git rev-parse "${current_commit}^{tree}")"
+          desired_tree="$(git write-tree)"
+
+          if [[ "$current_tree" != "$desired_tree" ]] || \
+             ! git merge-base --is-ancestor "$upstream_commit" "$current_commit"; then
+            sync_commit="$({
+              printf 'chore: sync upstream source\n\n'
+              printf 'Upstream-Commit: %s\n' "$upstream_commit"
+            } | git commit-tree "$desired_tree" -p "$current_commit" -p "$upstream_commit")"
+            git reset --hard "$sync_commit"
+            git push origin refs/heads/main:refs/heads/main
+          else
+            git reset --hard "$current_commit"
+            echo "main is already up to date."
+          fi
+
+          # 其他上游分支保持相同提交；上游删除分支后，目标仓库也会删除。
+          while IFS= read -r upstream_ref; do
+            branch="${upstream_ref#refs/remotes/upstream/}"
+            [[ "$branch" == "main" ]] && continue
+            git push --force origin "$upstream_ref:refs/heads/$branch"
+          done < <(git for-each-ref --format='%(refname)' refs/remotes/upstream/)
+
+          while IFS=$'\t' read -r _ target_ref; do
+            branch="${target_ref#refs/heads/}"
+            [[ "$branch" == "main" ]] && continue
+            if ! git show-ref --verify --quiet "refs/remotes/upstream/$branch"; then
+              git push origin --delete "refs/heads/$branch"
+            fi
+          done < <(git ls-remote --heads origin)
+
+          # 标签按上游强制对齐，包括同步新增、更新和删除。
+          git push --force origin --tags
+          while IFS=$'\t' read -r _ target_ref; do
+            tag="${target_ref#refs/tags/}"
+            [[ "$tag" == *'^{}' ]] && continue
+            if ! git show-ref --verify --quiet "refs/tags/$tag"; then
+              git push origin --delete "refs/tags/$tag"
+            fi
+          done < <(git ls-remote --tags origin)
