@@ -1,0 +1,17 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Claude / local tooling
+.claude/
+
+# Build or temp outputs
+*.log
+*.tmp
+*.bak
+.codex
+__pycache__/
+*.pyc
