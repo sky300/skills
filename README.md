@@ -13,7 +13,6 @@ A collection of agent skills for the [open agent skills ecosystem](https://www.n
 - **[chinese-humanizer](./chinese-humanizer/)** — Strip the AI flavor out of Simplified Chinese prose: stock phrases, nominalization, translationese sentence structure, template rhythm; keeps facts, terminology, and the author's voice.
 - **[xianyu-operations](./xianyu-operations/)** — Xianyu (闲鱼 / Goofish) operations: keyword search, item detail, own listings, IM sessions — plus publishing, taking listings down and sending messages, each write approved by the user. mtop JSON API over plain HTTP, with a browser path only for search.
 - **[affine-documents](./affine-documents/)** — Read and write AFFiNE documents as an agent: what a tool-written markdown body converts into, why no write path can create an equation, how to tell a damaged document from an intact one, and the repair order (editor paste, then verification from the stored snapshot).
-- **[affine-administration](./affine-administration/)** — Manage a running self-hosted AFFiNE: configuration layers (file vs `app_configs`), OIDC login and its look-alike failures, Copilot BYOK against a custom endpoint, and the MCP server's read/write gating.
 
 ## Installation
 
@@ -48,7 +47,6 @@ xianyu-operations/        # SKILL.md + references/ + templates/ + README
 quadlet-creator/          # SKILL.md + references/ + templates/ + README
 video-edit-planner/       # SKILL.md + references/ + scripts/ + README
 affine-documents/         # SKILL.md + references/ + scripts/ + templates/ + README
-affine-administration/    # SKILL.md + references/ + README
 ```
 
 Several of these skills were previously maintained as standalone repositories (now archived and deleted) and were consolidated here.
