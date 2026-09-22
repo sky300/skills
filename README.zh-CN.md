@@ -12,6 +12,8 @@
 - **[china-weather-query](./china-weather-query/)** — 用中国气象局官方数据查国内天气：实况、预报、预警、空气质量。
 - **[chinese-humanizer](./chinese-humanizer/)** — 中文表述拟人化：去掉简体中文里的公文腔、名词化、翻译腔与模板节奏，保留事实、术语与作者声口。
 - **[xianyu-operations](./xianyu-operations/)** — 闲鱼（Goofish）操作：关键词搜索、商品详情、自己的商品列表、消息会话，以及发布/下架商品与发消息（写操作需用户逐次同意）。mtop JSON 接口走纯 HTTP，只有搜索需要浏览器。
+- **[affine-documents](./affine-documents/)** — 以 agent 身份读写 AFFiNE 文档：工具写入的 markdown 会转成什么、为什么任何写入路径都创建不出公式、如何区分完好与已损坏的文档，以及修复工序（编辑器粘贴 → 从存储快照验证）。
+- **[affine-administration](./affine-administration/)** — 管理运行中的自托管 AFFiNE：配置分层（配置文件 vs `app_configs`）、OIDC 登录与其各类「像配置错」的故障、指向自定义端点的 Copilot BYOK，以及 MCP 服务器的读写闸门。
 
 ## 安装
 
@@ -43,6 +45,8 @@ discord-user-operations/  # SKILL.md + references/ + README
 xianyu-operations/        # SKILL.md + references/ + templates/ + README
 quadlet-creator/          # SKILL.md + references/ + templates/ + README
 video-edit-planner/       # SKILL.md + references/ + scripts/ + README
+affine-documents/         # SKILL.md + references/ + scripts/ + templates/ + README
+affine-administration/    # SKILL.md + references/ + README
 ```
 
 其中若干技能原以独立仓库维护（那些仓库已归档并删除），现已合并到本仓库。
