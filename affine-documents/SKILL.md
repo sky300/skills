@@ -55,5 +55,5 @@ Details, the five-line probe that established the delimiter rules, the damage fi
 
 ## Shipped files
 
-- `scripts/snapshot-strings.py` — decode a snapshot blob (raw or hex, file or stdin) into readable block strings; stdlib only, no environment assumptions. Count markers by piping into `grep -o … | wc -l` — `grep -c` counts runs, not occurrences, and undercounts.
+- `scripts/snapshot-strings.py` — decode a snapshot blob into readable block strings; stdlib only, no environment assumptions. Takes the raw blob as a file, or a hex dump as a file or on stdin (stdin requires `--hex`). Count markers by piping into `grep -o … | wc -l` — `grep -c` counts runs, not occurrences, and undercounts.
 - `templates/read-doc-snapshot.sh` — copy-and-adapt snippet that fetches a document's snapshot row out of the database container and dumps either the block tree or a block-ID-annotated markdown read-back. The container runtime, container names, and database credentials are marked values to set from the deployment.

@@ -10,7 +10,10 @@ inline latex sources) survives as plain ASCII runs separated by control bytes.
 This script does the one job that must be exact — separating those runs from
 the binary framing — and nothing else. Counting markers, comparing against a
 source document, and deciding whether a document is damaged are judgement calls
-that belong to the agent, which can pipe this output into `grep -c`.
+that belong to the agent, which can pipe this output into `grep -o … | wc -l`.
+Use `-o` with `wc -l`, never `grep -c`: `-c` counts decoded *lines* and several
+markers usually share one run, so on a repaired document `grep -c 'frac'`
+reported 24 where the true count was 39.
 
 Usage:
     snapshot-strings.py <blob-file>
@@ -18,8 +21,10 @@ Usage:
     snapshot-strings.py --hex -              # hex on stdin
     snapshot-strings.py <blob-file> --min 8  # only runs of at least 8 chars
 
-Input is either the raw blob or its hex encoding (as returned by
-`select encode(blob,'hex')`), one long line or wrapped.
+Input is either the raw blob in a file or its hex encoding (as returned by
+`select encode(blob,'hex')`), one long line or wrapped. Stdin carries hex and
+requires `--hex` — a raw blob cannot be told apart from wrapped hex reliably, so
+the script refuses the ambiguous case instead of guessing.
 """
 
 import argparse
