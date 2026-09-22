@@ -12,7 +12,7 @@ A collection of agent skills for the [open agent skills ecosystem](https://www.n
 - **[china-weather-query](./china-weather-query/)** — China weather from CMA official data: observation, forecast, warnings, AQI.
 - **[chinese-humanizer](./chinese-humanizer/)** — Strip the AI flavor out of Simplified Chinese prose: stock phrases, nominalization, translationese sentence structure, template rhythm; keeps facts, terminology, and the author's voice.
 - **[xianyu-operations](./xianyu-operations/)** — Xianyu (闲鱼 / Goofish) operations: keyword search, item detail, own listings, IM sessions — plus publishing, taking listings down and sending messages, each write approved by the user. mtop JSON API over plain HTTP, with a browser path only for search.
-- **[affine-documents](./affine-documents/)** — Read and write AFFiNE documents as an agent: what a tool-written markdown body converts into, why no write path can create an equation, how to tell a damaged document from an intact one, and the repair order (editor paste, then verification from the stored snapshot).
+- **[zitadel-administration](./zitadel-administration/)** — Operate a self-hosted ZITADEL instance through its APIs: service accounts and their three authentication methods, administrator roles at instance/org/project level, projects, OIDC/API/SAML applications, organizations, users and role assignments — plus the connectRPC v2 versus legacy v1 REST split, the error model, and the tasks only the legacy API can still do.
 
 ## Installation
 
@@ -46,7 +46,7 @@ discord-user-operations/  # SKILL.md + references/ + README
 xianyu-operations/        # SKILL.md + references/ + templates/ + README
 quadlet-creator/          # SKILL.md + references/ + templates/ + README
 video-edit-planner/       # SKILL.md + references/ + scripts/ + README
-affine-documents/         # SKILL.md + references/ + scripts/ + templates/ + README
+zitadel-administration/   # SKILL.md + references/ + templates/ + README
 ```
 
 Several of these skills were previously maintained as standalone repositories (now archived and deleted) and were consolidated here.
