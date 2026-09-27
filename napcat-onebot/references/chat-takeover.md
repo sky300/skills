@@ -21,12 +21,13 @@ To allow an agent model to generate each chat reply dynamically, the architectur
 
 Before opening a takeover window, the host agent must evaluate its platform capabilities:
 
-### The Two Capability Checks
-1. Can the agent platform expose an **OpenAI-compatible API endpoint** (e.g. Hermes `api_server` at `POST /v1/chat/completions`)?
-2. Alternatively, does the agent platform support dynamic **Webhook subscriptions** (e.g. `hermes webhook`)?
+### The Single Prerequisite Check
+Can the host agent platform expose an **OpenAI-compatible API endpoint** (e.g. Hermes `api_server` at `POST /v1/chat/completions`, or a local agent API server)?
+
+*(Note: Webhooks are NOT required for this architecture. The worker ingests messages via NapCat's outbound WebSocket stream and dispatches calls to the Agent's API endpoint via standard HTTP requests.)*
 
 ### Tier 1: Preferred Architecture (Worker + Agent API Server)
-**Use this whenever Check 1 or 2 is satisfied.**
+**Use this whenever the agent platform can expose an OpenAI-compatible API endpoint.**
 
 ```
 [QQ WebSocket Stream]
@@ -50,7 +51,7 @@ Before opening a takeover window, the host agent must evaluate its platform capa
 - **Full Agent Intelligence**: Unlike a bare script calling an external LLM, the platform's API session retains the full system prompt, skills, and memory capabilities.
 
 ### Tier 2: Mandatory Fallback Negotiation Rule
-> **Rule**: If the agent's host platform **does not** support an OpenAI-compatible API endpoint and **does not** support webhooks, the agent **must stop and discuss options with the user** before taking action. Never make a silent assumption.
+> **Rule**: If the agent's host platform **does not** support an OpenAI-compatible API endpoint, the agent **must stop and discuss options with the user** before taking action. Never make a silent assumption.
 
 The agent must explain the trade-offs and present the two alternatives:
 1. **Inline Chat Session Takeover**:
