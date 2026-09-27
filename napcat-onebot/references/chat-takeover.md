@@ -1,6 +1,6 @@
 # Chat Window Takeover (NapCat OneBot v11)
 
-How an autonomous agent temporarily takes over a QQ private or group chat window to handle automated replies, without freezing the primary agent loop.
+How an autonomous agent temporarily takes over a QQ private or group chat window to handle automated replies, without freezing the primary agent loop or polluting the user's primary chat session.
 
 ---
 
@@ -9,15 +9,60 @@ How an autonomous agent temporarily takes over a QQ private or group chat window
 ### The Anti-Pattern
 In standard tool-use execution, calling a long-running foreground tool (e.g. `while True: time.sleep(...)`) **blocks and suspends the primary agent model**. The agent cannot receive intermediate events, reason across turns, or formulate replies during tool execution. Doing so causes tool timeouts or completely stalls the conversation.
 
-### The Decoupled Model (Sensor + Brain)
-To allow the **current session's primary model** to generate each chat reply dynamically, the architecture must separate:
-1. **Event Sensor (Inbound)**: A non-blocking background listener or webhook receiver that buffers, debounces, and filters incoming messages.
-2. **Agent Trigger (Interrupt / Wake)**: An out-of-band notification or webhook callback that wakes the primary model for a single reasoning turn.
-3. **Agent Action (Outbound)**: The model reasons over context, drafts the response, and calls `send_private_msg` / `send_group_msg` via HTTP.
+### The Decoupled Model (Sensor/Worker + Brain)
+To allow an agent model to generate each chat reply dynamically, the architecture must separate:
+1. **Event Sensor / Worker (Inbound)**: A non-blocking background listener that buffers, debounces, and filters incoming messages.
+2. **Agent Reasoning (Brain)**: The agent receives the aggregated context in an isolated session turn, formulates a response, and returns the reply text.
+3. **Outbound Dispatch**: The generated text is sent to the QQ conversation via OneBot HTTP API (`/send_private_msg` or `/send_group_msg`).
 
 ---
 
-## 2. Resolving "Me" (Zero-Guessing Rule)
+## 2. Architecture Selection: Preferred vs Fallback Decision Tree
+
+Before opening a takeover window, the host agent must evaluate its platform capabilities:
+
+### The Two Capability Checks
+1. Can the agent platform expose an **OpenAI-compatible API endpoint** (e.g. Hermes `api_server` at `POST /v1/chat/completions`)?
+2. Alternatively, does the agent platform support dynamic **Webhook subscriptions** (e.g. `hermes webhook`)?
+
+### Tier 1: Preferred Architecture (Worker + Agent API Server)
+**Use this whenever Check 1 or 2 is satisfied.**
+
+```
+[QQ WebSocket Stream]
+         │
+         ▼ (5.0s Debounce + Self Filter)
+[Background Worker Script]
+         │
+         ▼ (POST /v1/chat/completions with X-Hermes-Session-Id: qq-<id>)
+[Agent Platform API Server] (Isolated API session: full memory, tools, reasoning)
+         │
+         ▼ (HTTP JSON response with reply text)
+[Background Worker Script]
+         │
+         ▼ (POST /send_group_msg or /send_private_msg)
+[NapCat OneBot HTTP API] -> QQ Chat
+```
+
+**Why this is the preferred tier**:
+- **100% Silent & Non-Disruptive**: The request runs on the platform's API server, completely isolated from user-facing chat adapters (e.g. Telegram, Discord). Even if the user has `tool_progress: all` enabled, **zero tool bubbles or commentary leak into the user's chat**.
+- **Context Isolation**: Chat history is kept in an independent session (e.g. `qq-group-778330249`), preventing QQ chatter from polluting the user's active prompt or consuming main session tokens.
+- **Full Agent Intelligence**: Unlike a bare script calling an external LLM, the platform's API session retains the full system prompt, skills, and memory capabilities.
+
+### Tier 2: Mandatory Fallback Negotiation Rule
+> **Rule**: If the agent's host platform **does not** support an OpenAI-compatible API endpoint and **does not** support webhooks, the agent **must stop and discuss options with the user** before taking action. Never make a silent assumption.
+
+The agent must explain the trade-offs and present the two alternatives:
+1. **Inline Chat Session Takeover**:
+   - The sensor wakes the active user chat session using background process notifications (`notify=['TAKEOVER_EVENT']`).
+   - *Warning to user*: Every reply triggers an agent turn in the current chat. If the user's client has tool progress or verbose logging enabled, tool execution cards (`💻 terminal ...`) and completion summaries will appear in the active chat.
+2. **Direct Model Provider Gateway**:
+   - The worker script bypasses the agent platform entirely and queries a bare external LLM API (e.g. OpenAI/Anthropic/DeepSeek endpoint) directly.
+   - *Warning to user*: The bot will reply completely silently without UI noise, but will lack the agent's persistent memory, specialized skills, and local tool execution capabilities.
+
+---
+
+## 3. Resolving "Me" (Zero-Guessing Rule)
 
 > **Rule**: When filtering out the account's own messages, **never guess the account identity** by inspecting friend lists, scanning remarks, or reading chat history.
 
@@ -29,7 +74,7 @@ Always rely strictly on these two authorities.
 
 ---
 
-## 3. Recommended Design: 5-Second Silence Debounce
+## 4. Recommended Design: 5-Second Silence Debounce
 
 Human conversation patterns on instant messaging platforms rarely resemble single complete paragraphs. Users frequently split one thought across 2 to 4 rapid short messages within a few seconds.
 
@@ -44,7 +89,7 @@ Human conversation patterns on instant messaging platforms rarely resemble singl
 
 ---
 
-## 4. In-Flight Concurrency: What Happens if a New Message Arrives During Generation?
+## 5. In-Flight Concurrency: What Happens if a New Message Arrives During Generation?
 
 A common edge case: *Message A arrives → 5s silence passes → Model begins generating Reply A → At second 7, Message B arrives.*
 
@@ -61,7 +106,7 @@ A common edge case: *Message A arrives → 5s silence passes → Model begins ge
 
 ---
 
-## 5. Enabling NapCat WebSocket Server
+## 6. Enabling NapCat WebSocket Server
 
 NapCat supports two distinct WebSocket server architectures:
 
@@ -133,22 +178,29 @@ If you need an independent WebSocket server instance (e.g. custom heartbeat inte
 
 ---
 
-## 6. Standalone Python Sensor Template
+## 7. Complete Production Worker Template (Preferred Tier)
 
-This script acts as the background event sensor. It computes only what must be exact (parsing, debouncing, self-filtering, timeout) and contains no LLM code.
+This script acts as the background worker. It connects to the OneBot WebSocket, enforces 5.0s debounce, queries the Agent's OpenAI-compatible API endpoint in an isolated session, and sends replies via OneBot HTTP API.
 
-To run without dependency issues on modern systems with `uv`:
+Run seamlessly with `uv`:
 ```bash
-uv run --with websockets python3 takeover_sensor.py --url ws://127.0.0.1:3001 --token <token> --target group:778330249 --ttl 1800
+uv run --with websockets python3 takeover_worker.py \
+  --ws-url ws://127.0.0.1:3001 \
+  --http-url http://127.0.0.1:3001 \
+  --token <onebot_token> \
+  --agent-api http://127.0.0.1:8642/v1/chat/completions \
+  --agent-key <agent_key> \
+  --target group:778330249 \
+  --ttl 1800
 ```
 
-### Template Code (`takeover_sensor.py`)
+### Script Code (`takeover_worker.py`)
 ```python
 #!/usr/bin/env python3
 """
-Self-contained NapCat OneBot v11 WebSocket Takeover Sensor.
-Listens to WebSocket events, debounces incoming messages by 5s,
-filters self-sent messages, and emits 'TAKEOVER_EVENT <json>' to stdout.
+Production NapCat Takeover Worker (Preferred Architecture).
+Listens to OneBot WS, debounces by 5s, calls Agent API Server, and dispatches reply.
+Runs completely silent without polluting the user's primary chat session.
 """
 import sys
 import json
@@ -156,6 +208,8 @@ import time
 import asyncio
 import inspect
 import argparse
+import urllib.request
+import urllib.error
 
 try:
     import websockets
@@ -163,47 +217,80 @@ except ImportError:
     sys.stderr.write("Error: 'websockets' library required. Run with: uv run --with websockets python3 ...\n")
     sys.exit(1)
 
-MARKER_READY = "TAKEOVER_READY"
-MARKER_EVENT = "TAKEOVER_EVENT"
-MARKER_NOTICE = "TAKEOVER_NOTICE"
-MARKER_EXIT = "TAKEOVER_EXIT"
+def query_agent_api(api_url, api_key, session_id, prompt):
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "X-Hermes-Session-Id": session_id
+    }
+    payload = {
+        "model": "hermes-agent",
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(api_url, data=data, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+            return res["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        sys.stderr.write(f"Agent API call failed: {e}\n")
+        return None
 
-def emit(marker, **fields):
-    print(marker + " " + json.dumps(fields, ensure_ascii=False), flush=True)
+def send_onebot_message(http_url, token, target_kind, target_id, message_text):
+    endpoint = "/send_group_msg" if target_kind == "group" else "/send_private_msg"
+    url = f"{http_url.rstrip('/')}{endpoint}"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}"
+    }
+    payload = {"message": message_text}
+    if target_kind == "group":
+        payload["group_id"] = int(target_id)
+    else:
+        payload["user_id"] = int(target_id)
 
-async def monitor(ws_url, token, target, ttl_seconds, debounce_seconds):
-    target_kind, _, target_id = target.partition(":")
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        sys.stderr.write(f"OneBot send failed: {e}\n")
+        return None
+
+async def run_worker(args):
+    target_kind, _, target_id = args.target.partition(":")
     if target_kind not in ("group", "private"):
         sys.stderr.write("Error: --target must be 'group:<id>' or 'private:<id>'\n")
         sys.exit(1)
 
-    # Version-adaptive headers: websockets >= 14 uses additional_headers, older uses extra_headers
     connect_kwargs = {}
-    if token:
+    if args.token:
         params = inspect.signature(websockets.connect).parameters
         if "additional_headers" in params:
-            connect_kwargs["additional_headers"] = {"Authorization": f"Bearer {token}"}
+            connect_kwargs["additional_headers"] = {"Authorization": f"Bearer {args.token}"}
         else:
-            connect_kwargs["extra_headers"] = {"Authorization": f"Bearer {token}"}
+            connect_kwargs["extra_headers"] = {"Authorization": f"Bearer {args.token}"}
 
     start_time = time.time()
-    deadline = start_time + ttl_seconds
+    deadline = start_time + args.ttl
     pending = []
     last_arrival = 0.0
 
-    emit(MARKER_READY, target=target, ttl=ttl_seconds, debounce=debounce_seconds)
+    print(f"Takeover Worker started for {args.target}, TTL={args.ttl}s", flush=True)
 
     while time.time() < deadline:
         try:
-            async with websockets.connect(ws_url, **connect_kwargs) as ws:
-                emit(MARKER_NOTICE, status="connected", target=target)
+            async with websockets.connect(args.ws_url, **connect_kwargs) as ws:
+                print("Connected to OneBot WebSocket stream.", flush=True)
                 while time.time() < deadline:
                     try:
                         raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
                     except asyncio.TimeoutError:
                         raw = None
                     except Exception:
-                        break  # Socket disconnected, outer loop reconnects
+                        break
 
                     if raw:
                         try:
@@ -212,59 +299,64 @@ async def monitor(ws_url, token, target, ttl_seconds, debounce_seconds):
                             event = {}
 
                         if event.get("post_type") == "message":
-                            msg_type = event.get("message_type")
                             user_id = str(event.get("user_id", ""))
                             self_id = str(event.get("self_id", ""))
 
-                            # Rule 2: Zero-guessing own identity
+                            # Rule: Zero-guessing own identity
                             if user_id == self_id:
                                 continue
 
-                            # Match target conversation
                             is_target = False
-                            if target_kind == "group" and msg_type == "group":
+                            if target_kind == "group" and event.get("message_type") == "group":
                                 is_target = str(event.get("group_id", "")) == target_id
-                            elif target_kind == "private" and msg_type == "private":
+                            elif target_kind == "private" and event.get("message_type") == "private":
                                 is_target = user_id == target_id
 
                             if is_target:
                                 raw_text = event.get("raw_message", "")
                                 sender_info = event.get("sender", {})
                                 sender_name = sender_info.get("card") or sender_info.get("nickname") or user_id
-                                pending.append({
-                                    "user_id": user_id,
-                                    "sender_name": sender_name,
-                                    "text": raw_text,
-                                    "time": event.get("time", int(time.time()))
-                                })
+                                pending.append(f"{sender_name}: {raw_text}")
                                 last_arrival = time.time()
 
-                    # Rule 3: 5.0s quiet-window debounce
-                    if pending and (time.time() - last_arrival >= debounce_seconds):
-                        emit(
-                            MARKER_EVENT,
-                            target=target,
-                            messages=pending,
-                            summary="\n".join([f"{p['sender_name']}: {p['text']}" for p in pending]),
-                            count=len(pending),
-                            timestamp=int(time.time())
-                        )
+                    # 5.0s Debounce trigger
+                    if pending and (time.time() - last_arrival >= args.debounce):
+                        aggregated_text = "\n".join(pending)
                         pending.clear()
 
+                        prompt = (
+                            f"The following message(s) arrived in the conversation ({args.target}):\n"
+                            f"{aggregated_text}\n\n"
+                            f"Reply naturally as a regular chat participant. Output only the message text directly."
+                        )
+                        session_id = f"qq-{target_kind}-{target_id}"
+                        reply = await asyncio.to_thread(
+                            query_agent_api, args.agent_api, args.agent_key, session_id, prompt
+                        )
+                        if reply:
+                            # Pacing delay
+                            await asyncio.sleep(2.0)
+                            await asyncio.to_thread(
+                                send_onebot_message, args.http_url, args.token, target_kind, target_id, reply
+                            )
+
         except Exception as exc:
-            emit(MARKER_NOTICE, status="reconnecting", error=str(exc))
+            print(f"Connection error: {exc}. Retrying in 3s...", flush=True)
             await asyncio.sleep(3)
 
-    emit(MARKER_EXIT, reason="ttl_expired")
+    print("Takeover Worker TTL expired.", flush=True)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="NapCat WS Takeover Sensor")
-    parser.add_argument("--url", required=True, help="WebSocket URL (e.g. ws://127.0.0.1:3001)")
-    parser.add_argument("--token", default="", help="Access Token")
+    parser = argparse.ArgumentParser(description="NapCat Takeover Worker")
+    parser.add_argument("--ws-url", required=True, help="OneBot WebSocket URL")
+    parser.add_argument("--http-url", required=True, help="OneBot HTTP API URL")
+    parser.add_argument("--token", default="", help="OneBot Token")
+    parser.add_argument("--agent-api", required=True, help="Agent Platform OpenAI-compatible API URL")
+    parser.add_argument("--agent-key", default="", help="Agent Platform API Key")
     parser.add_argument("--target", required=True, help="Target conversation ('group:<id>' or 'private:<id>')")
-    parser.add_argument("--ttl", type=int, default=1800, help="Max takeover duration in seconds")
-    parser.add_argument("--debounce", type=float, default=5.0, help="Debounce silence window in seconds")
+    parser.add_argument("--ttl", type=int, default=1800, help="TTL in seconds")
+    parser.add_argument("--debounce", type=float, default=5.0, help="Debounce in seconds")
 
     args = parser.parse_args()
-    asyncio.run(monitor(args.url, args.token, args.target, args.ttl, args.debounce))
+    asyncio.run(run_worker(args))
 ```
