@@ -7,7 +7,9 @@ description: "Use when sending or reading QQ messages through a NapCat OneBot v1
 
 Talk to QQ through a self-hosted [NapCat](https://github.com/NapNeko/NapCatQQ) protocol side that exposes [OneBot 11](https://github.com/botuniverse/onebot-11) over HTTP. Use it to send group and private messages and to read chat history on demand.
 
-This skill covers the **HTTP request/response surface** — calls the agent makes itself. It does not cover event push (reverse WebSocket, HTTP report): the HTTP server cannot wake you when someone sends a message. Read history on demand instead of building a listener unless the task really requires live reactions.
+This skill covers the **HTTP request/response surface** — calls the agent makes itself. Read history on demand instead of building a listener unless the task really requires live reactions.
+
+For temporary chat window takeover and event-driven auto-reply architectures, see `references/chat-takeover.md`. For unattended login restoration across container restarts, see `references/login-persistence.md`.
 
 ## Credentials
 
@@ -125,4 +127,6 @@ A personal QQ account driven through a protocol side violates QQ's terms of serv
 - `references/api-actions.md` — actions grouped by task, with parameters, and what the HTTP surface cannot do
 - `references/request-and-errors.md` — envelope, authentication failures, retcode handling, id precision
 - `references/message-segments.md` — segment types, fields, and what arrives back in history
-- `references/events-and-push.md` — the push transports to reach for when timing, not content, is the requirement
+- `references/events-and-push.md` — push transports to reach for when timing, not content, is the requirement
+- `references/chat-takeover.md` — chat window takeover, decoupling sensors from agent reasoning, and WS/webhook setup
+- `references/login-persistence.md` — device identity, GUID calculation, MAC pinning, and persistence across container recreation

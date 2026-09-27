@@ -16,10 +16,12 @@ The agent gets what it needs to send group and private messages, read chat histo
 - Where every fact comes from: the five authorities, what each covers, and the order to check them in
 - The push transports (reverse WebSocket, HTTP report) and what they cost, for tasks where timing rather than content is the requirement
 - Bringing up the protocol side itself when nothing answers, including the rootless-Podman detail that the image's entrypoint must start as root
+- Unattended login persistence across container recreation: volume persistence, the four login environment variables, and device GUID / MAC address pinning
+- Chat window takeover: decoupling background event sensors from agent reasoning turns, NapCat WebSocket server setup, and anti-risk pacing guidelines
 
 ## What it does not cover
 
-Event push. NapCat can push messages to you over reverse WebSocket or HTTP report, but that is a listener architecture, not a request/response one. This skill deliberately reads history on demand instead — and documents the push alternatives so that choice is an informed one rather than a gap.
+Event push as a general messaging architecture. This skill defaults to reading history on demand for typical tasks, but provides complete blueprints in `references/chat-takeover.md` for scenarios requiring real-time session takeover.
 
 ## Installation
 
@@ -47,6 +49,8 @@ references/api-actions.md         # actions grouped by task, with parameters
 references/request-and-errors.md  # envelope, auth, retcodes, id precision
 references/message-segments.md    # segment types and fields, send and receive
 references/events-and-push.md     # push transports and their cost, when timing matters
+references/chat-takeover.md       # takeover architecture, WS sensor template, config guide
+references/login-persistence.md   # container persistence, four env vars, GUID/MAC pinning
 ```
 
 ## Warning
