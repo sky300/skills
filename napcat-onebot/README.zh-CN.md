@@ -16,10 +16,12 @@
 - 每个事实的出处：五个权威来源各自覆盖什么、按什么顺序查证
 - 推送类传输（反向 WebSocket、HTTP 上报）及其代价——当需求是「及时」而非「内容」时用
 - 没有实例时的部署路径，含 rootless Podman 下「镜像 entrypoint 必须以 root 启动」这个坑
+- 容器重建与重启后的免扫码登录持久化：两大数据卷挂载、四项协同环境变量与设备 GUID / MAC 固化机制
+- 聊天窗口临时接管：后台事件监听器（Sensor）与主模型推理（Brain）解耦、NapCat WebSocket 服务端配置与拟人防风控规则
 
 ## 不覆盖
 
-事件推送。NapCat 支持反向 WebSocket 或 HTTP 上报把消息推给你，但那属于常驻监听架构，不是请求-应答。本技能刻意改为按需拉历史，同时把推送方案写清楚——让这个取舍是知情选择，而不是缺口。
+通用常态下的全量事件长连推送。本技能常规任务刻意改为按需拉历史，但在 `references/chat-takeover.md` 中为需要实时会话接管的场景提供了完整的解耦架构设计与实现蓝图。
 
 ## 安装
 
@@ -47,6 +49,8 @@ references/api-actions.md         # 按任务分组的接口与参数
 references/request-and-errors.md  # 信封、鉴权、retcode、id 精度
 references/message-segments.md    # 消息段类型与字段（发送与接收）
 references/events-and-push.md     # 推送类传输及其代价（需求是「及时」时）
+references/chat-takeover.md       # 接管架构、WS 监听器代码模板与配置指引
+references/login-persistence.md   # 容器持久化、四项环境变量与 GUID/MAC 固化
 ```
 
 ## 警告
