@@ -179,7 +179,51 @@ If you need an independent WebSocket server instance (e.g. custom heartbeat inte
 
 ---
 
-## 7. Complete Production Worker Template (Preferred Tier)
+## 7. Daemon Execution & Lifecycle Management
+
+How to run the background worker cleanly depends on the capabilities of the host agent's environment:
+
+### Strategy 1: Agent-Native Background Runner (Recommended for Bounded/Temporary Takeover)
+- If the host agent platform has a built-in background task runner (e.g. Hermes `terminal(background=true)`):
+  - Launch the worker directly via the agent's native background tool.
+  - Rely on the worker's `--ttl` parameter for automatic self-termination once the requested duration expires.
+  - **Advantage**: Zero host configuration footprint; leaves no dangling system files after the takeover window ends.
+
+### Strategy 2: OS Service Fallback (Systemd User Unit / Launchd)
+- If the agent tool lacks native background process management, or if the user requests **permanent/long-term unattended takeover**:
+  - Run as an OS-level user daemon (e.g. Linux `systemd --user` service or macOS `launchd`).
+  - Example systemd user unit (`~/.config/systemd/user/napcat-takeover.service`):
+```ini
+[Unit]
+Description=NapCat OneBot Takeover Worker
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/uv run --with websockets python3 <path-to-worker.py> \
+  --ws-url ws://<host>:<port> \
+  --http-url http://<host>:<port> \
+  --token <onebot_token> \
+  --agent-api http://<agent-host>:<port>/v1/chat/completions \
+  --agent-key <agent_key> \
+  --target group:<target_group_id> \
+  --debounce 5.0
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
+```
+Manage cleanly with:
+```bash
+systemctl --user daemon-reload
+systemctl --user start napcat-takeover.service
+systemctl --user status napcat-takeover.service
+```
+
+---
+
+## 8. Complete Production Worker Template (Preferred Tier)
 
 This script acts as the background worker. It connects to the OneBot WebSocket, enforces 5.0s debounce, queries the Agent's OpenAI-compatible API endpoint in an isolated session, and sends replies via OneBot HTTP API.
 
