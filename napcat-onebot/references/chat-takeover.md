@@ -2,49 +2,66 @@
 
 How an autonomous agent temporarily takes over a QQ private or group chat window to handle automated replies, without freezing the primary agent loop.
 
-## Core Architecture: Inversion of Control
+---
+
+## 1. Core Architecture: Inversion of Control
 
 ### The Anti-Pattern
 In standard tool-use execution, calling a long-running foreground tool (e.g. `while True: time.sleep(...)`) **blocks and suspends the primary agent model**. The agent cannot receive intermediate events, reason across turns, or formulate replies during tool execution. Doing so causes tool timeouts or completely stalls the conversation.
 
-### The Decoupled Model
+### The Decoupled Model (Sensor + Brain)
 To allow the **current session's primary model** to generate each chat reply dynamically, the architecture must separate:
-1. **Event Sensor (Inbound)**: A non-blocking background listener or webhook receiver that buffers and filters messages.
-2. **Agent Trigger (Interrupt)**: An out-of-band notification or webhook callback that wakes the primary model for a single reasoning turn.
+1. **Event Sensor (Inbound)**: A non-blocking background listener or webhook receiver that buffers, debounces, and filters incoming messages.
+2. **Agent Trigger (Interrupt / Wake)**: An out-of-band notification or webhook callback that wakes the primary model for a single reasoning turn.
 3. **Agent Action (Outbound)**: The model reasons over context, drafts the response, and calls `send_private_msg` / `send_group_msg` via HTTP.
 
 ---
 
-## Two Feasible Approaches
+## 2. Resolving "Me" (Zero-Guessing Rule)
 
-### Approach 1: NapCat HTTP Report + Agent Webhook (Event-Driven)
-NapCat pushes message events via HTTP POST to the agent platform's webhook endpoint (e.g. `hermes webhook`).
+> **Rule**: When filtering out the account's own messages, **never guess the account identity** by inspecting friend lists, scanning remarks, or reading chat history.
 
-1. **Register Subscription**: The agent registers a temporary webhook listener (e.g. `hermes webhook subscribe qq-takeover ...`).
-2. **Dispatch**: NapCat forwards incoming messages to the webhook URL.
-3. **Model Wakeup**: The platform receives the POST, formats the prompt with the sender and text, and invokes a single agent turn.
-4. **Execution**: The model reasons, calls the OneBot HTTP API to reply, and finishes the turn.
-5. **Teardown**: When the takeover duration expires, the agent removes the webhook subscription.
+In OneBot v11:
+- **WebSocket Events**: Every event envelope natively contains `self_id` (the bot's UIN). Comparing `event.get("user_id") == event.get("self_id")` instantly identifies own-messages.
+- **HTTP API**: Calling `GET /get_login_info` returns `{"data": {"user_id": <uin>, "nickname": "..."}}`.
 
-### Approach 2: Background WS Sensor + Pattern-Match Notification (Self-Contained)
-A lightweight background Python script monitors NapCat's WebSocket stream, while the agent runtime intercepts trigger patterns from its stdout.
-
-1. **Launch Sensor**: The agent launches the sensor in the background:
-   `terminal(command="python3 takeover_sensor.py ...", background=true, notify=["NEW_MESSAGE:*"])`
-2. **Debounce & Filter**:
-   - The script connects to NapCat's forward WebSocket.
-   - Buffers incoming lines from the target UIN across a 3–5 second window (combining rapid multi-line messages).
-   - Ignores self-sent messages (`sender.user_id == self_id`).
-   - If the account owner sends a message from another client (e.g. phone), the script terminates immediately to surrender control.
-3. **Interrupt & Wake**: When ready, the script prints:
-   `NEW_MESSAGE: {"user_id": 123456, "text": "combined message"}`
-   The runtime's process manager catches the pattern and injects it as an out-of-band message into the active conversation turn.
-4. **Model Reply**: The model wakes up, sees `NEW_MESSAGE: ...`, generates a reply, and calls `send_private_msg`.
-5. **Teardown**: The sensor self-terminates when its TTL expires, or the agent terminates it via process management tools.
+Always rely strictly on these two authorities.
 
 ---
 
-## Enabling NapCat WebSocket Server
+## 3. Recommended Design: 5-Second Silence Debounce
+
+Human conversation patterns on instant messaging platforms rarely resemble single complete paragraphs. Users frequently split one thought across 2 to 4 rapid short messages within a few seconds.
+
+### Why Debounce is Critical
+1. **Semantic Completeness**: Merging rapid fragments (e.g. "Wait", "Actually", "Can you check this?") into a single prompt preserves full conversational context.
+2. **Anti-Risk & Account Safety**: Instant, robotic replies to every single short line will trigger Tencent's platform risk controls and result in temporary muting or account restriction.
+3. **Token & Call Efficiency**: Prevents spinning up 4 separate model completions when 1 coherent response is needed.
+
+### Standard Debounce Policy
+- **Default Window**: **5.0 seconds of silence**.
+- The sensor resets its silence countdown on each new message from the target conversation. Once 5.0 seconds elapse with no further incoming messages, the aggregated buffer is emitted as a single event.
+
+---
+
+## 4. In-Flight Concurrency: What Happens if a New Message Arrives During Generation?
+
+A common edge case: *Message A arrives → 5s silence passes → Model begins generating Reply A → At second 7, Message B arrives.*
+
+### Behavior in Single-Session / Queue-Based Runtimes (e.g. Hermes, Telegram)
+- **Serialized Execution (No Parallel Race, No Cancellation)**:
+  - The runtime does not cancel the in-flight Reply A. Reply A completes and is sent via HTTP API.
+  - Message B (after its own 5s debounce) enters the event queue. Once Turn A completes, the runtime immediately wakes the model for Turn B.
+  - **Result**: The agent sends Reply A, then immediately sees Message B alongside the logged history of Reply A, and produces a contextual follow-up Reply B.
+  - **No collisions**: Because turns are strictly serialized, there are no overlapping network requests or out-of-order replies.
+
+### Behavior in Stateless Webhook Environments
+- If using independent serverless webhooks, two incoming webhooks could spin up concurrent containers.
+- **Requirement**: Use a concurrency limit of 1 (or a FIFO queue / mutex lock per conversation) so Message B waits for Reply A to finish before being dispatched.
+
+---
+
+## 5. Enabling NapCat WebSocket Server
 
 NapCat supports two distinct WebSocket server architectures:
 
@@ -112,92 +129,142 @@ If you need an independent WebSocket server instance (e.g. custom heartbeat inte
 **CRITICAL**: A port number cannot appear in both `httpServers` and `websocketServers` at the same time. Doing so will crash the WebSocket listener with `listen EADDRINUSE`.
 
 ### Mandatory Agent Interaction Rule
-
 > **Rule**: If the user asks the agent to modify a NapCat instance to enable WebSocket servers or HTTP reporting, the agent **must ask the user for the instance deployment mode** (e.g. host bare-metal, Docker/Podman container, Systemd service) **and the exact configuration file path**. Never guess file paths or assume container layouts.
 
 ---
 
-## Python Sensor Template (Approach 2)
+## 6. Standalone Python Sensor Template
 
-This template serves as a background event sensor. It computes only what must be exact (event parsing, debouncing, interruption checks) and does not call any LLM directly.
+This script acts as the background event sensor. It computes only what must be exact (parsing, debouncing, self-filtering, timeout) and contains no LLM code.
 
+To run without dependency issues on modern systems with `uv`:
+```bash
+uv run --with websockets python3 takeover_sensor.py --url ws://127.0.0.1:3001 --token <token> --target group:778330249 --ttl 1800
+```
+
+### Template Code (`takeover_sensor.py`)
 ```python
 #!/usr/bin/env python3
 """
-Lightweight NapCat OneBot v11 WebSocket Sensor.
-Connects to NapCat WS, debounces target messages, checks for owner takeover,
-and outputs 'NEW_MESSAGE: <json>' to stdout for runtime pattern matching.
+Self-contained NapCat OneBot v11 WebSocket Takeover Sensor.
+Listens to WebSocket events, debounces incoming messages by 5s,
+filters self-sent messages, and emits 'TAKEOVER_EVENT <json>' to stdout.
 """
 import sys
 import json
 import time
 import asyncio
+import inspect
 import argparse
 
 try:
     import websockets
 except ImportError:
-    sys.stderr.write("Error: 'websockets' library is required (pip install websockets).\n")
+    sys.stderr.write("Error: 'websockets' library required. Run with: uv run --with websockets python3 ...\n")
     sys.exit(1)
 
-async def monitor(ws_url, token, target_uin, self_uin, ttl_seconds, debounce_seconds):
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
+MARKER_READY = "TAKEOVER_READY"
+MARKER_EVENT = "TAKEOVER_EVENT"
+MARKER_NOTICE = "TAKEOVER_NOTICE"
+MARKER_EXIT = "TAKEOVER_EXIT"
+
+def emit(marker, **fields):
+    print(marker + " " + json.dumps(fields, ensure_ascii=False), flush=True)
+
+async def monitor(ws_url, token, target, ttl_seconds, debounce_seconds):
+    target_kind, _, target_id = target.partition(":")
+    if target_kind not in ("group", "private"):
+        sys.stderr.write("Error: --target must be 'group:<id>' or 'private:<id>'\n")
+        sys.exit(1)
+
+    # Version-adaptive headers: websockets >= 14 uses additional_headers, older uses extra_headers
+    connect_kwargs = {}
+    if token:
+        params = inspect.signature(websockets.connect).parameters
+        if "additional_headers" in params:
+            connect_kwargs["additional_headers"] = {"Authorization": f"Bearer {token}"}
+        else:
+            connect_kwargs["extra_headers"] = {"Authorization": f"Bearer {token}"}
+
     start_time = time.time()
-    last_msg_time = 0
-    buffer = []
+    deadline = start_time + ttl_seconds
+    pending = []
+    last_arrival = 0.0
 
-    async with websockets.connect(ws_url, extra_headers=headers) as ws:
-        while (time.time() - start_time) < ttl_seconds:
-            try:
-                # Wait for next frame with timeout to handle debounce flushes
-                raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
-                event = json.loads(raw)
-            except asyncio.TimeoutError:
-                # Flush buffer if silence window elapsed
-                if buffer and (time.time() - last_msg_time >= debounce_seconds):
-                    payload = {"user_id": target_uin, "text": "\n".join(buffer)}
-                    print(f"NEW_MESSAGE: {json.dumps(payload, ensure_ascii=False)}", flush=True)
-                    buffer.clear()
-                continue
+    emit(MARKER_READY, target=target, ttl=ttl_seconds, debounce=debounce_seconds)
 
-            if event.get("post_type") != "message":
-                continue
+    while time.time() < deadline:
+        try:
+            async with websockets.connect(ws_url, **connect_kwargs) as ws:
+                emit(MARKER_NOTICE, status="connected", target=target)
+                while time.time() < deadline:
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        raw = None
+                    except Exception:
+                        break  # Socket disconnected, outer loop reconnects
 
-            sender_id = str(event.get("user_id") or event.get("sender", {}).get("user_id"))
+                    if raw:
+                        try:
+                            event = json.loads(raw)
+                        except Exception:
+                            event = {}
 
-            # Owner interruption detection: owner spoke in the chat
-            if sender_id == str(self_uin):
-                sys.stderr.write("Owner active in target chat. Surrendering takeover.\n")
-                sys.exit(0)
+                        if event.get("post_type") == "message":
+                            msg_type = event.get("message_type")
+                            user_id = str(event.get("user_id", ""))
+                            self_id = str(event.get("self_id", ""))
 
-            # Match target conversation
-            if sender_id == str(target_uin):
-                raw_text = event.get("raw_message", "")
-                buffer.append(raw_text)
-                last_msg_time = time.time()
+                            # Rule 2: Zero-guessing own identity
+                            if user_id == self_id:
+                                continue
+
+                            # Match target conversation
+                            is_target = False
+                            if target_kind == "group" and msg_type == "group":
+                                is_target = str(event.get("group_id", "")) == target_id
+                            elif target_kind == "private" and msg_type == "private":
+                                is_target = user_id == target_id
+
+                            if is_target:
+                                raw_text = event.get("raw_message", "")
+                                sender_info = event.get("sender", {})
+                                sender_name = sender_info.get("card") or sender_info.get("nickname") or user_id
+                                pending.append({
+                                    "user_id": user_id,
+                                    "sender_name": sender_name,
+                                    "text": raw_text,
+                                    "time": event.get("time", int(time.time()))
+                                })
+                                last_arrival = time.time()
+
+                    # Rule 3: 5.0s quiet-window debounce
+                    if pending and (time.time() - last_arrival >= debounce_seconds):
+                        emit(
+                            MARKER_EVENT,
+                            target=target,
+                            messages=pending,
+                            summary="\n".join([f"{p['sender_name']}: {p['text']}" for p in pending]),
+                            count=len(pending),
+                            timestamp=int(time.time())
+                        )
+                        pending.clear()
+
+        except Exception as exc:
+            emit(MARKER_NOTICE, status="reconnecting", error=str(exc))
+            await asyncio.sleep(3)
+
+    emit(MARKER_EXIT, reason="ttl_expired")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NapCat WS Takeover Sensor")
     parser.add_argument("--url", required=True, help="WebSocket URL (e.g. ws://127.0.0.1:3001)")
     parser.add_argument("--token", default="", help="Access Token")
-    parser.add_argument("--target", required=True, help="Target UIN")
-    parser.add_argument("--self-uin", required=True, help="Bot's own UIN")
-    parser.add_argument("--ttl", type=int, default=3600, help="Max takeover duration in seconds")
-    parser.add_argument("--debounce", type=float, default=3.5, help="Debounce window in seconds")
+    parser.add_argument("--target", required=True, help="Target conversation ('group:<id>' or 'private:<id>')")
+    parser.add_argument("--ttl", type=int, default=1800, help="Max takeover duration in seconds")
+    parser.add_argument("--debounce", type=float, default=5.0, help="Debounce silence window in seconds")
 
     args = parser.parse_args()
-    asyncio.run(monitor(args.url, args.token, args.target, args.self_uin, args.ttl, args.debounce))
+    asyncio.run(monitor(args.url, args.token, args.target, args.ttl, args.debounce))
 ```
-
----
-
-## Safety and Pacing Guidelines
-
-1. **Debounce (Message Aggregation)**:
-   Human chat patterns involve splitting one sentence across 2–4 rapid messages. The sensor buffers lines over 3–5 seconds before waking the agent.
-2. **Anti-Loop Defense**:
-   Filter out messages where `sender.user_id` matches the bot's own account.
-3. **Owner Preemption**:
-   If the user opens their phone and sends a message in the same chat, the agent must surrender control immediately.
-4. **Pacing**:
-   Add a randomized typing delay (3–8 seconds) before calling `send_private_msg` to avoid robotic instant responses that trigger platform risk control.
