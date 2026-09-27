@@ -21,45 +21,32 @@ To allow an agent model to generate each chat reply dynamically, the architectur
 
 Before opening a takeover window, the host agent must evaluate its platform capabilities:
 
-### The Single Prerequisite Check
-Can the host agent platform expose an **OpenAI-compatible API endpoint** (e.g. Hermes `api_server` at `POST /v1/chat/completions`, or a local agent API server)?
+### Tier 1: Preferred Architectures (Decoupled, Isolated & Silent)
+Use Tier 1 whenever the host agent platform supports either an OpenAI-compatible API endpoint or a Webhook receiver. Both options keep the user-facing chat interface (e.g. Telegram, Discord, WebUI) completely clean and free of tool execution bubbles.
 
-*(Note: Webhooks are NOT required for this architecture. The worker ingests messages via NapCat's outbound WebSocket stream and dispatches calls to the Agent's API endpoint via standard HTTP requests.)*
+#### Option 1A: Worker + Agent API Server (Pull / WS + REST, Recommended)
+- **Mechanism**: A lightweight background worker connects to NapCat's outbound WebSocket stream, applies 5-second silence debounce, and calls the agent platform's OpenAI-compatible API endpoint (e.g. `POST /v1/chat/completions` with a session routing header such as `X-Session-Id` or `X-Hermes-Session-Id`). The worker then posts the returned reply text to NapCat's HTTP API.
+- **Why Recommended**:
+  - **Zero NapCat Configuration Changes**: Operates over NapCat's default shared HTTP/WebSocket port without editing instance config files or restarting services.
+  - **100% Silent & Non-Disruptive**: Runs on the platform's API server layer. Even if the user's chat client has verbose tool progress enabled (e.g. `tool_progress: all`), **zero tool bubbles or execution logs leak into the user's chat**.
+  - **Context Isolation**: Chat history is kept in an independent session (e.g. `qq-group-<id>`), preventing QQ chatter from polluting the user's active prompt or consuming main session tokens.
+  - **Full Agent Intelligence**: Retains the host agent's full system prompt, skills, and memory capabilities.
 
-### Tier 1: Preferred Architecture (Worker + Agent API Server)
-**Use this whenever the agent platform can expose an OpenAI-compatible API endpoint.**
+#### Option 1B: NapCat HTTP Report + Agent Webhook (Push + Event-Driven)
+- **Mechanism**: If the agent platform supports dynamic Webhook subscriptions (e.g. `hermes webhook`, or custom HTTP callback endpoints), configure NapCat's `httpClients` to push message events directly to the Webhook URL. Each incoming webhook triggers an independent agent turn, which calls OneBot's HTTP API to reply.
+- **Trade-off**: Completely event-driven without running a persistent background script, but requires modifying NapCat's instance configuration (`httpClients`) and restarting the service.
 
-```
-[QQ WebSocket Stream]
-         │
-         ▼ (5.0s Debounce + Self Filter)
-[Background Worker Script]
-         │
-         ▼ (POST /v1/chat/completions with X-Hermes-Session-Id: qq-<id>)
-[Agent Platform API Server] (Isolated API session: full memory, tools, reasoning)
-         │
-         ▼ (HTTP JSON response with reply text)
-[Background Worker Script]
-         │
-         ▼ (POST /send_group_msg or /send_private_msg)
-[NapCat OneBot HTTP API] -> QQ Chat
-```
-
-**Why this is the preferred tier**:
-- **100% Silent & Non-Disruptive**: The request runs on the platform's API server, completely isolated from user-facing chat adapters (e.g. Telegram, Discord). Even if the user has `tool_progress: all` enabled, **zero tool bubbles or commentary leak into the user's chat**.
-- **Context Isolation**: Chat history is kept in an independent session (e.g. `qq-group-778330249`), preventing QQ chatter from polluting the user's active prompt or consuming main session tokens.
-- **Full Agent Intelligence**: Unlike a bare script calling an external LLM, the platform's API session retains the full system prompt, skills, and memory capabilities.
+---
 
 ### Tier 2: Mandatory Fallback Negotiation Rule
-> **Rule**: If the agent's host platform **does not** support an OpenAI-compatible API endpoint, the agent **must stop and discuss options with the user** before taking action. Never make a silent assumption.
+> **Rule**: If the agent's host platform **does not** support an OpenAI-compatible API endpoint and **does not** support webhooks, the agent **must stop and discuss options with the user** before taking action. Never make a silent assumption or attempt proprietary hacks.
 
-The agent must explain the trade-offs and present the two alternatives:
-1. **Inline Chat Session Takeover**:
-   - The sensor wakes the active user chat session using background process notifications (`notify=['TAKEOVER_EVENT']`).
-   - *Warning to user*: Every reply triggers an agent turn in the current chat. If the user's client has tool progress or verbose logging enabled, tool execution cards (`💻 terminal ...`) and completion summaries will appear in the active chat.
-2. **Direct Model Provider Gateway**:
-   - The worker script bypasses the agent platform entirely and queries a bare external LLM API (e.g. OpenAI/Anthropic/DeepSeek endpoint) directly.
-   - *Warning to user*: The bot will reply completely silently without UI noise, but will lack the agent's persistent memory, specialized skills, and local tool execution capabilities.
+The agent must explain the trade-off and present the portable fallback:
+- **Direct Model Gateway Worker (Standalone LLM Client)**:
+  - The worker script bypasses the agent platform entirely and queries a bare external LLM API (e.g. OpenAI/Anthropic/DeepSeek endpoint or local vLLM/Ollama runner) directly.
+  - *Warning to user*: The bot will reply completely silently without UI noise, but will lack the host agent's persistent memory, specialized skills, and local tool execution capabilities.
+
+*(Note: In-session event injection via stdout pattern matching is avoided as a general recommendation because it relies on specialized runtime capabilities and is not portable across standard coding agents.)*
 
 ---
 
@@ -181,10 +168,10 @@ If you need an independent WebSocket server instance (e.g. custom heartbeat inte
 
 ## 7. Daemon Execution & Lifecycle Management
 
-How to run the background worker cleanly depends on the capabilities of the host agent's environment:
+How to run the background worker cleanly depends on the host agent's environment:
 
 ### Strategy 1: Agent-Native Background Runner (Recommended for Bounded/Temporary Takeover)
-- If the host agent platform has a built-in background task runner (e.g. Hermes `terminal(background=true)`):
+- If the host agent platform has a built-in background task runner (e.g. Hermes background terminal tool, Codex background execution):
   - Launch the worker directly via the agent's native background tool.
   - Rely on the worker's `--ttl` parameter for automatic self-termination once the requested duration expires.
   - **Advantage**: Zero host configuration footprint; leaves no dangling system files after the takeover window ends.
@@ -223,7 +210,7 @@ systemctl --user status napcat-takeover.service
 
 ---
 
-## 8. Complete Production Worker Template (Preferred Tier)
+## 8. Complete Production Worker Template (Option 1A)
 
 This script acts as the background worker. It connects to the OneBot WebSocket, enforces 5.0s debounce, queries the Agent's OpenAI-compatible API endpoint in an isolated session, and sends replies via OneBot HTTP API.
 
@@ -266,10 +253,11 @@ def query_agent_api(api_url, api_key, session_id, prompt):
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
+        "X-Session-Id": session_id,
         "X-Hermes-Session-Id": session_id
     }
     payload = {
-        "model": "hermes-agent",
+        "model": "default",
         "messages": [{"role": "user", "content": prompt}]
     }
     data = json.dumps(payload).encode("utf-8")
