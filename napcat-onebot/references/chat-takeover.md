@@ -30,6 +30,7 @@ Use Tier 1 whenever the host agent platform supports either an OpenAI-compatible
   - **Zero NapCat Configuration Changes**: Operates over NapCat's default shared HTTP/WebSocket port without editing instance config files or restarting services.
   - **100% Silent & Non-Disruptive**: Runs on the platform's API server layer. Even if the user's chat client has verbose tool progress enabled (e.g. `tool_progress: all`), **zero tool bubbles or execution logs leak into the user's chat**.
   - **Context Isolation**: Chat history is kept in an independent session (e.g. `qq-group-<id>`), preventing QQ chatter from polluting the user's active prompt or consuming main session tokens.
+  - **Server-Side Session Persistence**: While standard `/v1/chat/completions` endpoints are stateless by default, many agent platforms provide server-side thread persistence via specific request headers (e.g. `X-Session-Id`, or `X-Hermes-Session-Id` in Hermes). Passing a consistent identifier for the conversation (e.g. `qq-group-<id>`) allows the agent platform to automatically maintain multi-turn history and context across separate HTTP calls, freeing the lightweight worker from having to manage an internal message history buffer.
   - **Full Agent Intelligence**: Retains the host agent's full system prompt, skills, and memory capabilities.
 
 #### Option 1B: NapCat HTTP Report + Agent Webhook (Push + Event-Driven)
