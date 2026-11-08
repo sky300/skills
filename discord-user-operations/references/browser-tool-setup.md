@@ -1,6 +1,6 @@
 # Giving the agent a browser tool (text guidance)
 
-Access Path B in this skill assumes you can drive a browser that is logged into
+This skill assumes you can drive a browser that is logged into
 Discord. This page is for when you cannot — either because you have no browser
 tool at all, or no way to get the user's session into it.
 
@@ -12,7 +12,7 @@ Source guide (the author's write-up, CC BY-NC-SA 4.0):
 **<https://www.nite07.com/posts/agent-playwright-cloak/>**
 — English mirror: <https://www.nite07.com/posts/agent-playwright-cloak/index.md>
 
-## What Path B actually needs
+## What the browser session needs
 
 Three things, no more:
 
@@ -33,7 +33,7 @@ Discord web is tolerant, but a stock automation browser still shows the usual
 signals (`navigator.webdriver = true`, empty plugin list, mismatched TLS
 fingerprint). CloakBrowser is an anti-detect Chromium build; Playwright MCP is
 the entry point, and its `--caps=storage` flag is what provides the
-cookie/storage tools Path B relies on.
+cookie/storage tools the session load relies on.
 
 **1. Install the kernel.** The exact path matters later, so read it back:
 
@@ -90,7 +90,7 @@ profile lives in memory; then also pass
 the directory this skill was loaded from — an absolute path only your install
 knows.
 
-`--caps=storage` adds what Path B needs:
+`--caps=storage` adds what the session load needs:
 
 | Tool | Purpose |
 |---|---|
@@ -142,13 +142,18 @@ where the binary lives.
 
 ## After the tool exists
 
-1. Load the user's Discord session into it: a logged-in persistent profile, or
-   the storage state saved in `.state/storage-state.json` (it holds the `token`
-   entry for the `https://discord.com` origin). Where to save it after a fresh
-   login: `session-persistence.md`. Unwrapping details:
-   `browser-session-details.md`.
+1. Load the user's Discord session into it: a logged-in persistent profile, or a
+   storage state saved in `.state/storage-state.json` (where to save it after a
+   fresh login: `session-persistence.md`). Note that a storage state only helps
+   if the web client still reads it: **current Discord web exposes no
+   `localStorage` to page JS (verified 2026-11-08)**, so a restored state can
+   leave the app on a login screen while the token inside it is still valid for
+   the API. When that happens, use the token directly from a `discord.com` page —
+   `token-handoff.md`.
 2. Open `https://discord.com` and confirm you see the app shell rather than a
-   login screen — that is the session check; no code needed.
+   login screen — that is the session check. If it is a login screen and the user
+   cannot log in from this host (headless, datacenter egress, CAPTCHA), switch to
+   the handoff path instead of fighting the form.
 3. Continue with `browser-session-details.md` (DOM reads, same-origin `fetch` for
    writes).
 
@@ -157,9 +162,11 @@ where the binary lives.
 - **Report what you tried and where it stopped.** Do not silently fall back to a
   half-working path: reading the page without a session yields a login screen, and
   presenting that as data is worse than saying "no browser session available".
-- **The direct-HTTP path still works.** If the user can supply their token, Access
-  Path A needs no browser at all — that is often the faster unblock, and it is
-  worth offering before spending turns on browser setup.
+- **There is no fallback transport.** A standalone HTTP client with the user's
+  token is not a faster unblock — it gets the account flagged with a
+  Terms-of-Service warning and a forced password reset (`account-safety.md`).
+  Setup failing means the work waits: offer the user the alternatives in that
+  page instead of improvising a client.
 - **Never invent kernel paths.** If `cloakbrowser info` cannot be run, leave the
   placeholder and ask the user for the path. Do not glob likely install
   directories: a guessed path fails later and looks like a bug in the skill,
